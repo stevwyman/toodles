@@ -1,0 +1,14 @@
+/input/*
+!/input/.gitkeep
+/output/
+/aliases.json
+/aliases*.json
+/goal-order.json
+__pycache__/
+*.py[cod]
+.Python
+*.egg-info/
+.venv/
+venv/
+.DS_Store
+.pytest_cache/
