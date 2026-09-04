@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toodles"
+version = "0.1.0"
+description = "Merge Azure DevOps goal exports with GitHub epic/task exports into a project status report."
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.scripts]
+toodles = "toodles.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["toodles*"]

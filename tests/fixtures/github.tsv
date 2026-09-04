@@ -1,0 +1,17 @@
+Type	Title	URL	Status	Parent issue	Sub-issues progress	Created	Updated	Closed	Start date
+Epic	[prod] Network infrastructure is ready	https://github.com/example/project-tracker/issues/3	Needs Refinement		1 / 1 (100%)	2026-01-01T00:00:00Z	2026-01-02T00:00:00Z		
+Task	Network config	https://github.com/example/project-tracker/issues/14	Planned	https://github.com/example/project-tracker/issues/3		2026-01-03T00:00:00Z	2026-01-04T00:00:00Z		
+Epic	[QA] High-level designs complete	https://github.com/example/project-tracker/issues/19	In Progress		0 / 2 (0%)	2026-01-05T00:00:00Z	2026-01-06T00:00:00Z		
+Task	Design the network	https://github.com/example/project-tracker/issues/71	In Progress	https://github.com/example/project-tracker/issues/19	0 / 1 (0%)	2026-01-07T00:00:00Z	2026-01-08T00:00:00Z		
+Task	Evaluate routing	https://github.com/example/project-tracker/issues/42	Ready	https://github.com/example/project-tracker/issues/71		2026-01-09T00:00:00Z	2026-01-10T00:00:00Z		
+Epic	Helper infrastructure automation	https://github.com/example/project-tracker/issues/47	In Progress		1 / 2 (50%)	2026-01-11T00:00:00Z	2026-01-12T00:00:00Z		
+Task	Set up mirror registry	https://github.com/example/project-tracker/issues/46	In Progress	https://github.com/example/project-tracker/issues/47		2026-01-13T00:00:00Z	2026-01-14T00:00:00Z		
+Task	Create config repos	https://github.com/example/project-tracker/issues/53	Closed	https://github.com/example/project-tracker/issues/47		2026-01-15T00:00:00Z	2026-01-16T00:00:00Z	2026-01-16T00:00:00Z	
+Epic	Team access granted	https://github.com/example/project-tracker/issues/17	Closed		2 / 2 (100%)	2026-01-17T00:00:00Z	2026-01-18T00:00:00Z	2026-01-18T00:00:00Z	
+Task	Grant portal access	https://github.com/example/project-tracker/issues/11	Closed	https://github.com/example/project-tracker/issues/17		2026-01-19T00:00:00Z	2026-01-20T00:00:00Z	2026-01-20T00:00:00Z	
+Task	Grant training access	https://github.com/example/project-tracker/issues/15	Closed	https://github.com/example/project-tracker/issues/17		2026-01-21T00:00:00Z	2026-01-22T00:00:00Z	2026-01-22T00:00:00Z	
+Epic	[PROD] Load balancer is ready	https://github.com/example/project-tracker/issues/21				2026-01-23T00:00:00Z	2026-01-24T00:00:00Z		
+Epic	Closed setup leftover	https://github.com/example/project-tracker/issues/2	Closed		0 / 1 (0%)	2026-01-25T00:00:00Z	2026-01-26T00:00:00Z	2026-01-26T00:00:00Z	
+Task	Orphan setup task	https://github.com/example/project-tracker/issues/99	Planned			2026-01-27T00:00:00Z	2026-01-28T00:00:00Z		
+	GitHub-AzDO-Sync Test	https://github.com/example/project-tracker/issues/6	Closed			2026-01-29T00:00:00Z	2026-01-30T00:00:00Z	2026-01-30T00:00:00Z	
+	High-level design for compute	https://github.com/example/project-tracker/issues/67	In Progress	https://github.com/example/project-tracker/issues/19		2026-01-31T00:00:00Z	2026-02-01T00:00:00Z		

@@ -1,0 +1,11 @@
+ID,Work Item Type,Title,Assigned To,State,Leading Organizational Unit,Area Path,Tags
+"1001","Goal","[QA] Platform can be installed","Ada Owner <ada@example.com>","Resolved","T100","Org\Platform",
+"1101","Epic","[QA] Load balancer is ready","Sam Owner <sam@example.com>","Resolved","T100","Org\Platform",
+"1002","Goal","[PROD] Platform can be installed","Ada Owner <ada@example.com>","Active","T100","Org\Platform",
+"1201","Epic","[PROD] Load balancer is ready","Sam Owner <sam@example.com>","New","T100","Org\Platform","sync"
+"1202","Epic","Network prerequisites for production","Pat Owner <pat@example.com>","New","T100","Org\Platform","sync"
+"1003","Goal","[QA] Platform build is complete","Ada Owner <ada@example.com>","Active","T100","Org\Platform",
+"1301","Epic","[QA] High-level designs complete","Sam Owner <sam@example.com>","Active","T100","Org\Platform","sync"
+"1302","Epic","Helper infrastructure automation","Sam Owner <sam@example.com>","Active","T100","Org\Platform","sync"
+"1303","Epic","Team access granted","Ada Owner <ada@example.com>","Resolved","T100","Org\Platform","sync"
+"1304","Epic","Overlay components configured","Ada Owner <ada@example.com>","New","T100","Org\Platform","sync"
