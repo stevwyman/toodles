@@ -24,9 +24,9 @@ def render_markdown(report: ProjectReport) -> str:
         "Goals follow the manual order in goal-order.json.",
         "",
     ]
-    for env in report.summary_environments():
-        env_progress = report.overall_progress(env)
-        lines.append(f"- **{env}**: {_progress_line(env_progress)}")
+    for goal in report.goals:
+        progress = _goal_progress(goal)
+        lines.append(f"- **{goal.source_order}. {goal.title}**: {_progress_line(progress)}")
     lines.append("")
 
     for goal in report.goals:

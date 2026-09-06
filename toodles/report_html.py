@@ -112,7 +112,7 @@ def _render_goal(goal: Node) -> str:
     epics = "".join(_render_epic(epic) for epic in goal.children)
     assignee = goal.ado_assignee.split("<")[0].strip().rstrip(",")
     return (
-        f'<article class="goal" data-env="{escape(goal.environment)}" '
+        f'<article class="goal" data-goal="{goal.source_order}" data-env="{escape(goal.environment)}" '
         f'data-title="{escape(goal.title.casefold())}" data-order="{goal.source_order}">'
         f'<header><div class="goal-kicker">'
         f'<span class="seq" title="Manual goal order from goal-order.json">{goal.source_order}</span>'
@@ -161,9 +161,10 @@ def _legend() -> str:
     return "".join(chips)
 
 
-def _summary_card(label: str, progress: Progress, extra: str = "") -> str:
+def _summary_card(label: str, progress: Progress, extra: str = "", goal_key: str = "") -> str:
+    attr = f' data-goal="{escape(goal_key)}"' if goal_key else ""
     return (
-        f'<div class="summary-card"><p>{escape(label)}</p>'
+        f'<div class="summary-card"{attr}><p>{escape(label)}</p>'
         f"<strong>{_pct(progress)}</strong>"
         f"<span>{progress.done} of {progress.total} tasks closed</span>"
         f"{_bar(progress)}"
@@ -174,9 +175,18 @@ def _summary_card(label: str, progress: Progress, extra: str = "") -> str:
 def render_html(report: ProjectReport, generated_at: datetime | None = None) -> str:
     generated_at = generated_at or datetime.now(timezone.utc)
     overall = report.overall_progress()
-    env_cards = [_summary_card(env, report.overall_progress(env)) for env in report.summary_environments()]
-    env_options = "".join(
-        f'<option value="{escape(env)}">{escape(env)}</option>' for env in report.summary_environments()
+    goal_cards = [
+        _summary_card(
+            f"Goal {goal.source_order}",
+            goal.progress(),
+            extra=f"<span class='goal-title'>{escape(goal.title)}</span>",
+            goal_key=str(goal.source_order),
+        )
+        for goal in report.goals
+    ]
+    goal_options = "".join(
+        f'<option value="{goal.source_order}">{goal.source_order}. {escape(goal.title)}</option>'
+        for goal in report.goals
     )
     goals = "".join(_render_goal(goal) for goal in report.goals)
     unmapped = ""
@@ -184,7 +194,7 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
         epic_html = "".join(_render_epic(epic) for epic in report.unmapped_epics)
         orphans = "".join(_render_task(task, 0) for task in report.orphan_tasks)
         unmapped = (
-            '<article class="goal unmapped" data-env="Unmapped">'
+            '<article class="goal unmapped" data-goal="unmapped" data-env="Unmapped">'
             "<header><div class='goal-kicker'><p class='env-tag other'>Unmapped</p></div>"
             "<h2>Work not hanging under an Azure DevOps goal</h2>"
             "<p class='lede'>GitHub epics and tasks that could not be matched by title to the ADO roadmap.</p>"
@@ -273,7 +283,10 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       color: var(--pf-ink);
       min-height: 36px;
     }}
-    .toolbar input {{ min-width: 260px; }}
+    .toolbar input {{ min-width: 220px; }}
+    .toolbar select {{ min-width: min(420px, 100%); max-width: 100%; }}
+    .summary-card[data-goal] {{ cursor: pointer; }}
+    .summary-card.selected {{ box-shadow: inset 0 0 0 2px var(--pf-link); }}
     .toolbar input:focus, .toolbar select:focus {{
       outline: 2px solid var(--pf-link);
       outline-offset: 2px;
@@ -303,6 +316,10 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
     }}
     .summary-card strong {{ display: block; font-size: 32px; font-weight: 700; margin: 8px 0 2px; }}
     .summary-card span {{ color: var(--pf-muted); font-size: 13px; }}
+    .summary-card span.goal-title {{
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+      overflow: hidden; margin-top: 8px;
+    }}
     main {{ display: grid; gap: 16px; }}
     .goal header {{ padding: 16px 20px 12px; }}
     .goal-kicker {{ display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }}
@@ -418,17 +435,17 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
         {report.matched_epics} epics matched across both systems.</p>
       <div class="toolbar">
         <input id="search" type="search" placeholder="Filter by title">
-        <select id="env">
-          <option value="All">All environments</option>
-          {env_options}
-          <option value="Unmapped">Unmapped work</option>
+        <select id="goal">
+          <option value="All">All goals</option>
+          {goal_options}
+          <option value="unmapped">Unmapped work</option>
         </select>
       </div>
       <div class="legend">{_legend()}</div>
     </div>
     <section class="summary">
-      {_summary_card("Overall", overall, f"<span style='display:block;margin-top:8px'>{len(report.goals)} goals · {report.matched_epics} matched epics</span>")}
-      {"".join(env_cards)}
+      {_summary_card("Overall", overall, f"<span style='display:block;margin-top:8px'>{len(report.goals)} goals · {report.matched_epics} matched epics</span>", goal_key="All")}
+      {"".join(goal_cards)}
     </section>
     <main>
       {goals}
@@ -441,15 +458,15 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
   </div>
   <script>
     const search = document.getElementById("search");
-    const env = document.getElementById("env");
+    const goalFilter = document.getElementById("goal");
     function applyFilter() {{
       const q = (search.value || "").trim().toLowerCase();
-      const selected = env.value;
+      const selected = goalFilter.value;
       document.querySelectorAll("article.goal").forEach((goal) => {{
-        const envOk = selected === "All" || goal.dataset.env === selected;
+        const goalOk = selected === "All" || goal.dataset.goal === selected;
         const titleOk = !q || goal.dataset.title.includes(q) ||
           [...goal.querySelectorAll("[data-title]")].some((n) => n.dataset.title.includes(q));
-        goal.classList.toggle("hidden", !(envOk && titleOk));
+        goal.classList.toggle("hidden", !(goalOk && titleOk));
         if (q) {{
           goal.querySelectorAll("details").forEach((d) => {{
             const hit = (d.dataset.title || "").includes(q) || d.querySelector("[data-title]") &&
@@ -458,9 +475,21 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
           }});
         }}
       }});
+      document.querySelectorAll(".gaps").forEach((el) => {{
+        el.classList.toggle("hidden", selected !== "All");
+      }});
+      document.querySelectorAll(".summary-card[data-goal]").forEach((card) => {{
+        card.classList.toggle("selected", card.dataset.goal === selected);
+      }});
     }}
     search.addEventListener("input", applyFilter);
-    env.addEventListener("change", applyFilter);
+    goalFilter.addEventListener("change", applyFilter);
+    document.querySelectorAll(".summary-card[data-goal]").forEach((card) => {{
+      card.addEventListener("click", () => {{
+        goalFilter.value = card.dataset.goal;
+        applyFilter();
+      }});
+    }});
   </script>
 </body>
 </html>
