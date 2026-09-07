@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from toodles.models import Node, Progress, environment_from_title, normalize_title
-from toodles.parse import link_github_children
+from toodles.models import Node, Progress, normalize_title
+from toodles.parse import link_github_children, normalize_alias_map
 
 
 @dataclass
@@ -12,7 +12,6 @@ class MatchGap:
     ado_id: str = ""
     github_url: str = ""
     github_number: str = ""
-    environment: str = "Other"
     reason: str = ""
 
 
@@ -25,27 +24,9 @@ class ProjectReport:
     github_without_ado: list[MatchGap] = field(default_factory=list)
     matched_epics: int = 0
 
-    def environments(self) -> list[str]:
-        seen: list[str] = []
-        for goal in self.goals:
-            if goal.environment not in seen:
-                seen.append(goal.environment)
-        if self.unmapped_epics or self.orphan_tasks:
-            if "Unmapped" not in seen:
-                seen.append("Unmapped")
-        return seen
-
-    def summary_environments(self) -> list[str]:
-        return [env for env in self.environments() if env != "Unmapped"]
-
-    def goals_for(self, environment: str | None) -> list[Node]:
-        if environment in (None, "All"):
-            return self.goals
-        return [goal for goal in self.goals if goal.environment == environment]
-
-    def overall_progress(self, environment: str | None = None) -> Progress:
+    def overall_progress(self) -> Progress:
         result = Progress()
-        for goal in self.goals_for(environment):
+        for goal in self.goals:
             result.merge(goal.progress())
         return result
 
@@ -59,14 +40,66 @@ def _github_epic_index(items: dict[str, Node]) -> dict[str, Node]:
     return index
 
 
-def _resolve_github_epic(
+def _candidate_github_titles(ado_epic: Node, aliases: dict[str, list[str]]) -> list[str]:
+    ado_title = normalize_title(ado_epic.title)
+    titles: list[str] = []
+    seen: set[str] = set()
+    for title in aliases.get(ado_title, []):
+        if title and title not in seen:
+            seen.add(title)
+            titles.append(title)
+    if ado_title and ado_title not in seen:
+        titles.append(ado_title)
+    return titles
+
+
+def _resolve_github_epics(
     ado_epic: Node,
     gh_epics: dict[str, Node],
-    aliases: dict[str, str],
-) -> Node | None:
-    ado_title = normalize_title(ado_epic.title)
-    aliased = aliases.get(ado_title, ado_title)
-    return gh_epics.get(aliased) or gh_epics.get(ado_title)
+    aliases: dict[str, list[str]],
+) -> list[Node]:
+    matches: list[Node] = []
+    seen: set[str] = set()
+    for title in _candidate_github_titles(ado_epic, aliases):
+        gh_epic = gh_epics.get(title)
+        if gh_epic is None or gh_epic.key in seen:
+            continue
+        seen.add(gh_epic.key)
+        matches.append(gh_epic)
+    return matches
+
+
+def _github_links_for(matches: list[Node]) -> list[tuple[str, str]]:
+    links: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for match in matches:
+        key = match.github_url or match.github_number
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        links.append((match.github_number, match.github_url))
+    return links
+
+
+def _attach_github_epics(epic: Node, matches: list[Node], claimed: set[str]) -> int:
+    available = [match for match in matches if match.key not in claimed]
+    if not available:
+        return 0
+    epic.matched = True
+    epic.github_links = _github_links_for(available)
+    if len(available) == 1:
+        gh_epic = available[0]
+        epic.github_url = gh_epic.github_url
+        epic.github_status = gh_epic.github_status
+        epic.github_number = gh_epic.github_number
+        epic.closed_at = gh_epic.closed_at
+        epic.updated_at = gh_epic.updated_at
+        epic.children = gh_epic.children
+    else:
+        epic.children = available
+    for match in available:
+        _mark_subtree(match, claimed)
+    return len(available)
 
 
 def sort_goals(goals: list[Node], ordered_ids: list[str] | None = None) -> list[Node]:
@@ -93,10 +126,10 @@ def _mark_subtree(node: Node, seen: set[str]) -> None:
 def merge_project(
     ado_goals: list[Node],
     github_items: dict[str, Node],
-    aliases: dict[str, str] | None = None,
+    aliases: dict[str, str] | dict[str, list[str]] | None = None,
     goal_order: list[str] | None = None,
 ) -> ProjectReport:
-    aliases = aliases or {}
+    aliases = normalize_alias_map(aliases)
     link_github_children(github_items)
     gh_epics = _github_epic_index(github_items)
     matched_github_keys: set[str] = set()
@@ -105,28 +138,18 @@ def merge_project(
 
     for goal in ado_goals:
         for epic in goal.children:
-            gh_epic = _resolve_github_epic(epic, gh_epics, aliases)
-            if gh_epic is None:
+            matches = _resolve_github_epics(epic, gh_epics, aliases)
+            attached = _attach_github_epics(epic, matches, matched_github_keys)
+            if not attached:
                 ado_without_github.append(
                     MatchGap(
                         title=epic.title,
                         ado_id=epic.ado_id,
-                        environment=epic.environment or goal.environment,
-                        reason="No GitHub epic with the same title",
+                        reason="No GitHub epic with the same title or alias",
                     )
                 )
                 continue
-            matched_count += 1
-            epic.matched = True
-            epic.github_url = gh_epic.github_url
-            epic.github_status = gh_epic.github_status
-            epic.github_number = gh_epic.github_number
-            epic.closed_at = gh_epic.closed_at
-            epic.updated_at = gh_epic.updated_at
-            epic.children = gh_epic.children
-            if epic.environment == "Other":
-                epic.environment = environment_from_title(gh_epic.title) or goal.environment
-            _mark_subtree(gh_epic, matched_github_keys)
+            matched_count += attached
 
     unmapped_epics: list[Node] = []
     github_without_ado: list[MatchGap] = []
@@ -139,7 +162,6 @@ def merge_project(
                 title=node.title,
                 github_url=node.github_url,
                 github_number=node.github_number,
-                environment=node.environment,
                 reason="GitHub epic is not listed under any Azure DevOps goal",
             )
         )
@@ -155,8 +177,8 @@ def merge_project(
             orphan_tasks.append(node)
             _mark_subtree(node, matched_github_keys)
 
-    unmapped_epics.sort(key=lambda item: (item.environment, item.title.casefold()))
-    orphan_tasks.sort(key=lambda item: (item.environment, item.title.casefold()))
+    unmapped_epics.sort(key=lambda item: item.title.casefold())
+    orphan_tasks.sort(key=lambda item: item.title.casefold())
     return ProjectReport(
         goals=sort_goals(ado_goals, goal_order),
         unmapped_epics=unmapped_epics,

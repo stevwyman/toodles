@@ -34,7 +34,6 @@ def render_markdown(report: ProjectReport) -> str:
         lines += [
             f"## {goal.source_order}. {goal.title}",
             "",
-            f"- Environment: {goal.environment}",
             f"- ADO state: {goal.ado_state or 'n/a'} (`{goal.ado_id or '—'}`)",
             f"- Progress: {_progress_line(progress)}",
             "",
@@ -45,7 +44,11 @@ def render_markdown(report: ProjectReport) -> str:
             continue
         for epic in goal.children:
             epic_progress = epic.progress()
-            gh = f" · [#{epic.github_number}]({epic.github_url})" if epic.github_url else ""
+            gh = "".join(
+                f" · [#{number}]({url})" if url else f" · #{number}"
+                for number, url in epic.github_refs()
+                if number or url
+            )
             lines.append(
                 f"### {epic.title}{gh}"
             )
@@ -55,6 +58,7 @@ def render_markdown(report: ProjectReport) -> str:
             lines.append(f"- Tasks: {_progress_line(epic_progress)}")
             lines.append("")
             _append_tasks(lines, epic.children, depth=0)
+            lines.append("")
     if report.unmapped_epics or report.orphan_tasks:
         lines += ["## Unmapped GitHub work", ""]
         for epic in report.unmapped_epics:
@@ -74,8 +78,14 @@ def _append_tasks(lines: list[str], nodes: list[Node], depth: int) -> None:
     indent = "  " * depth
     for node in nodes:
         status = node.display_status or "no status"
-        link = f" [#{node.github_number}]({node.github_url})" if node.github_url else ""
-        lines.append(f"{indent}- [{status}] {node.title}{link}")
+        refs = [
+            f"[#{number}]({url})" if url else f"#{number}"
+            for number, url in node.github_refs()
+            if number or url
+        ]
+        link = f" {refs[0]}" if len(refs) == 1 else ("" if not refs else " " + ", ".join(refs))
+        prefix = "Epic: " if node.kind == "Epic" else ""
+        lines.append(f"{indent}- [{status}] {prefix}{node.title}{link}")
         _append_tasks(lines, node.children, depth + 1)
 
 
@@ -91,11 +101,13 @@ def render_text(report: ProjectReport) -> str:
     ]
     for goal in report.goals:
         progress = _goal_progress(goal)
-        lines.append(f"{goal.source_order}. [{goal.environment}] {goal.title}")
+        lines.append(f"{goal.source_order}. {goal.title}")
         lines.append(f"  ADO {goal.ado_id or '—'} · {goal.ado_state or 'n/a'} · {_progress_line(progress)}")
         for epic in goal.children:
             epic_progress = epic.progress()
-            gh = f" GH#{epic.github_number}" if epic.github_number else ""
+            gh = "".join(
+                f" GH#{number}" for number, _url in epic.github_refs() if number
+            )
             lines.append(
                 f"  - {epic.title} [{epic.display_status or 'n/a'}]{gh} {_progress_line(epic_progress)}"
             )

@@ -4,7 +4,8 @@ import unittest
 from pathlib import Path
 
 from toodles.merge import merge_project
-from toodles.parse import load_aliases, load_goal_order, parse_ado_csv, parse_github_tsv
+from toodles.models import normalize_title
+from toodles.parse import load_aliases, load_goal_order, normalize_alias_map, parse_ado_csv, parse_github_tsv
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ADO = FIXTURES / "ado.csv"
@@ -20,7 +21,6 @@ class MergeTests(unittest.TestCase):
             [epic.title for epic in goals[0].children],
             ["[QA] Load balancer is ready"],
         )
-        self.assertEqual(goals[2].environment, "QA")
         self.assertEqual(len(goals[2].children), 4)
 
     def test_report_uses_manual_goal_order(self) -> None:
@@ -63,6 +63,10 @@ class MergeTests(unittest.TestCase):
 
     def test_aliases_can_match_renamed_epics(self) -> None:
         aliases = load_aliases(FIXTURES / "aliases.json")
+        self.assertEqual(
+            aliases[normalize_title("Network prerequisites for production")],
+            [normalize_title("[prod] Network infrastructure is ready")],
+        )
         report = merge_project(parse_ado_csv(ADO), parse_github_tsv(GITHUB), aliases)
         network = next(
             epic
@@ -73,6 +77,40 @@ class MergeTests(unittest.TestCase):
         self.assertTrue(network.matched)
         self.assertEqual(network.github_number, "3")
         self.assertTrue(any(child.github_number == "14" for child in network.children))
+
+    def test_aliases_can_map_many_github_epics_to_one_ado_epic(self) -> None:
+        aliases = load_aliases(FIXTURES / "aliases-multi.json")
+        report = merge_project(parse_ado_csv(ADO), parse_github_tsv(GITHUB), aliases)
+        network = next(
+            epic
+            for goal in report.goals
+            for epic in goal.children
+            if "Network prerequisites" in epic.title
+        )
+        self.assertTrue(network.matched)
+        self.assertEqual(
+            [child.title for child in network.children],
+            ["[prod] Network infrastructure is ready", "DNS zones ready"],
+        )
+        self.assertEqual(
+            {item.github_number for item in network.work_items()},
+            {"14", "81"},
+        )
+        self.assertFalse(any(epic.github_number == "80" for epic in report.unmapped_epics))
+        overlay = next(
+            epic
+            for goal in report.goals
+            for epic in goal.children
+            if epic.title == "Overlay components configured"
+        )
+        self.assertFalse(overlay.matched)
+        self.assertTrue(any(gap.ado_id == "1304" for gap in report.ado_without_github))
+
+    def test_alias_values_must_be_titles(self) -> None:
+        with self.assertRaises(ValueError):
+            normalize_alias_map({"An ADO epic": 12})
+        with self.assertRaises(ValueError):
+            normalize_alias_map({"An ADO epic": ["GitHub epic", 3]})
 
 
 if __name__ == "__main__":

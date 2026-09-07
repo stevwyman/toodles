@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 
-from toodles.models import Node, environment_from_title, looks_like_noise, normalize_title
+from toodles.models import Node, looks_like_noise, normalize_title
 
 ISSUE_NUMBER_RE = re.compile(r"/issues/(\d+)(?:[?#]|$)")
 
@@ -19,16 +19,44 @@ def issue_number(url: str) -> str:
     return match.group(1) if match else ""
 
 
-def load_aliases(path: Path | None) -> dict[str, str]:
+def normalize_alias_map(raw: dict | None) -> dict[str, list[str]]:
+    """Normalize ADO title → one GitHub title or a list of GitHub titles."""
+    if not raw:
+        return {}
+    aliases: dict[str, list[str]] = {}
+    for source, target in raw.items():
+        key = normalize_title(str(source))
+        if isinstance(target, str):
+            values = [target]
+        elif isinstance(target, list):
+            values = target
+        else:
+            raise ValueError(
+                "Alias values must be a GitHub epic title or a list of GitHub epic titles"
+            )
+        titles: list[str] = []
+        seen: set[str] = set()
+        for item in values:
+            if not isinstance(item, str):
+                raise ValueError("Alias lists must contain GitHub epic titles as strings")
+            title = normalize_title(item)
+            if title and title not in seen:
+                seen.add(title)
+                titles.append(title)
+        aliases[key] = titles
+    return aliases
+
+
+def load_aliases(path: Path | None) -> dict[str, list[str]]:
     if path is None:
         return {}
     raw = json.loads(path.read_text(encoding="utf-8"))
-    aliases: dict[str, str] = {}
     if not isinstance(raw, dict):
-        raise ValueError("Alias file must be a JSON object of ADO title → GitHub title")
-    for source, target in raw.items():
-        aliases[normalize_title(str(source))] = normalize_title(str(target))
-    return aliases
+        raise ValueError(
+            "Alias file must be a JSON object of ADO title → GitHub title "
+            "or list of GitHub titles"
+        )
+    return normalize_alias_map(raw)
 
 
 def load_goal_order(path: Path | None) -> list[str]:
@@ -61,7 +89,6 @@ def parse_ado_csv(path: Path) -> list[Node]:
                     key=f"ado:{item_id}",
                     kind="Goal",
                     title=title,
-                    environment=environment_from_title(title),
                     ado_id=item_id,
                     ado_state=(row.get("State") or "").strip(),
                     ado_assignee=(row.get("Assigned To") or "").strip(),
@@ -75,7 +102,6 @@ def parse_ado_csv(path: Path) -> list[Node]:
                 key=f"ado:{item_id}",
                 kind="Epic",
                 title=title,
-                environment=environment_from_title(title) if current_goal is None else (current_goal.environment),
                 ado_id=item_id,
                 ado_state=(row.get("State") or "").strip(),
                 ado_assignee=(row.get("Assigned To") or "").strip(),
@@ -86,11 +112,8 @@ def parse_ado_csv(path: Path) -> list[Node]:
                     key="ado:unassigned",
                     kind="Goal",
                     title="Unassigned epics",
-                    environment="Other",
                 )
                 goals.append(current_goal)
-            if epic.environment == "Other":
-                epic.environment = current_goal.environment
             current_goal.children.append(epic)
     return goals
 
@@ -122,7 +145,6 @@ def parse_github_tsv(path: Path) -> dict[str, Node]:
                 key=url,
                 kind=kind,
                 title=title,
-                environment=environment_from_title(title),
                 github_url=url,
                 github_status=status or ("Closed" if closed else ""),
                 github_number=issue_number(url),

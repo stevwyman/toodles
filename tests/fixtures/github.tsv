@@ -15,3 +15,5 @@ Epic	Closed setup leftover	https://github.com/example/project-tracker/issues/2	C
 Task	Orphan setup task	https://github.com/example/project-tracker/issues/99	Planned			2026-01-27T00:00:00Z	2026-01-28T00:00:00Z		
 	GitHub-AzDO-Sync Test	https://github.com/example/project-tracker/issues/6	Closed			2026-01-29T00:00:00Z	2026-01-30T00:00:00Z	2026-01-30T00:00:00Z	
 	High-level design for compute	https://github.com/example/project-tracker/issues/67	In Progress	https://github.com/example/project-tracker/issues/19		2026-01-31T00:00:00Z	2026-02-01T00:00:00Z		
+Epic	DNS zones ready	https://github.com/example/project-tracker/issues/80	Planned			2026-02-02T00:00:00Z	2026-02-03T00:00:00Z		
+Task	Create DNS zone	https://github.com/example/project-tracker/issues/81	Ready	https://github.com/example/project-tracker/issues/80		2026-02-04T00:00:00Z	2026-02-05T00:00:00Z		

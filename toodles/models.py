@@ -19,23 +19,6 @@ def normalize_title(title: str) -> str:
     return " ".join((title or "").casefold().split())
 
 
-def environment_from_title(title: str) -> str:
-    upper = (title or "").upper()
-    has_qa = any(token in upper for token in ("HWQA", "[QA]"))
-    has_prod = any(token in upper for token in ("HWPROD", "HW-PROD", "HW PROD", "[PROD]"))
-    if has_qa and has_prod:
-        return "Shared"
-    if "HWQA" in upper:
-        return "HWQA"
-    if has_qa:
-        return "QA"
-    if any(token in upper for token in ("HWPROD", "HW-PROD", "HW PROD")):
-        return "HWPROD"
-    if has_prod:
-        return "PROD"
-    return "Other"
-
-
 def status_bucket(status: str | None) -> str:
     value = (status or "").strip().casefold()
     if not value:
@@ -98,7 +81,6 @@ class Node:
     key: str
     kind: str
     title: str
-    environment: str = "Other"
     ado_id: str = ""
     ado_state: str = ""
     ado_assignee: str = ""
@@ -106,6 +88,7 @@ class Node:
     github_url: str = ""
     github_status: str = ""
     github_number: str = ""
+    github_links: list[tuple[str, str]] = field(default_factory=list)
     closed_at: str = ""
     updated_at: str = ""
     parent_url: str = ""
@@ -113,6 +96,14 @@ class Node:
     noise: bool = False
     source_order: int = 0
     children: list["Node"] = field(default_factory=list)
+
+    def github_refs(self) -> list[tuple[str, str]]:
+        """GitHub issue number/url pairs attached to this node."""
+        if self.github_links:
+            return list(self.github_links)
+        if self.github_number or self.github_url:
+            return [(self.github_number, self.github_url)]
+        return []
 
     @property
     def display_status(self) -> str:

@@ -1,0 +1,7 @@
+{
+  "Network prerequisites for production": [
+    "[prod] Network infrastructure is ready",
+    "DNS zones ready"
+  ],
+  "Overlay components configured": "DNS zones ready"
+}

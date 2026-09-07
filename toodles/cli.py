@@ -49,8 +49,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--aliases",
         type=Path,
-        help="Optional JSON file mapping Azure DevOps epic titles to GitHub epic titles "
-        "(default: input/aliases.json or aliases.json if present)",
+        help="Optional JSON file mapping Azure DevOps epic titles to one GitHub title "
+        "or a list of GitHub titles (default: input/aliases.json or aliases.json if present)",
     )
     parser.add_argument(
         "--goal-order",

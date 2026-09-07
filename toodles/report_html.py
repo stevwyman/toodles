@@ -55,11 +55,11 @@ def _item_meta(node: Node) -> str:
     bits: list[str] = []
     if node.ado_id:
         bits.append(f"ADO {escape(node.ado_id)}")
-    if node.github_number:
-        label = f"#{escape(node.github_number)}"
-        if node.github_url:
-            bits.append(f'<a href="{escape(node.github_url)}" target="_blank" rel="noreferrer">{label}</a>')
-        else:
+    for number, url in node.github_refs():
+        label = f"#{escape(number)}" if number else "GitHub"
+        if url:
+            bits.append(f'<a href="{escape(url)}" target="_blank" rel="noreferrer">{label}</a>')
+        elif number:
             bits.append(label)
     if node.ado_assignee:
         name = node.ado_assignee.split("<")[0].strip().rstrip(",")
@@ -86,17 +86,26 @@ def _render_task(node: Node, depth: int) -> str:
     )
 
 
+def _render_epic_children(nodes: list[Node]) -> str:
+    if not nodes:
+        return '<p class="empty-note">No GitHub tasks linked to this epic yet.</p>'
+    parts: list[str] = []
+    for child in nodes:
+        if child.kind == "Epic":
+            parts.append(_render_epic(child))
+        else:
+            parts.append(_render_task(child, 0))
+    return "".join(parts)
+
+
 def _render_epic(epic: Node) -> str:
     progress = epic.progress()
-    tasks = "".join(_render_task(child, 0) for child in epic.children)
-    if not epic.children:
-        tasks = '<p class="empty-note">No GitHub tasks linked to this epic yet.</p>'
+    tasks = _render_epic_children(epic.children)
     title = escape(epic.title)
     if epic.github_url:
         title = f'<a href="{escape(epic.github_url)}" target="_blank" rel="noreferrer">{title}</a>'
     return (
-        f'<details class="epic" data-env="{escape(epic.environment)}" '
-        f'data-status="{escape(epic.bucket)}" data-title="{escape(epic.title.casefold())}" open>'
+        f'<details class="epic" data-status="{escape(epic.bucket)}" data-title="{escape(epic.title.casefold())}" open>'
         f"<summary><div class='epic-head'>"
         f"<div class='epic-title'><span class='kind'>Epic</span><span class='name'>{title}</span></div>"
         f"<div class='epic-stats'>{_status_pill(epic)}"
@@ -112,13 +121,13 @@ def _render_goal(goal: Node) -> str:
     epics = "".join(_render_epic(epic) for epic in goal.children)
     assignee = goal.ado_assignee.split("<")[0].strip().rstrip(",")
     return (
-        f'<article class="goal" data-goal="{goal.source_order}" data-env="{escape(goal.environment)}" '
+        f'<article class="goal" data-goal="{goal.source_order}" '
         f'data-title="{escape(goal.title.casefold())}" data-order="{goal.source_order}">'
-        f'<header><div class="goal-kicker">'
+        f'<header><div class="goal-heading">'
         f'<span class="seq" title="Manual goal order from goal-order.json">{goal.source_order}</span>'
-        f'<p class="env-tag {escape(goal.environment.casefold())}">{escape(goal.environment)}</p>'
+        f'<span class="kind">Goal</span>'
+        f'<h2>{escape(goal.title)}</h2>'
         f"</div>"
-        f"<h2>{escape(goal.title)}</h2>"
         f'<div class="goal-meta">'
         f"{_status_pill(goal)}"
         f'<span>ADO {escape(goal.ado_id or "—")}</span>'
@@ -146,7 +155,7 @@ def _gap_list(title: str, rows: list, empty: str) -> str:
         meta = " · ".join(extra)
         items.append(
             f"<li><strong>{escape(row.title)}</strong>"
-            f"<span>{escape(row.environment)}{(' · ' + meta) if meta else ''}</span></li>"
+            f"{f'<span>{meta}</span>' if meta else ''}</li>"
         )
     return (
         f'<section class="gap"><h3>{escape(title)}</h3>'
@@ -194,9 +203,9 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
         epic_html = "".join(_render_epic(epic) for epic in report.unmapped_epics)
         orphans = "".join(_render_task(task, 0) for task in report.orphan_tasks)
         unmapped = (
-            '<article class="goal unmapped" data-goal="unmapped" data-env="Unmapped">'
-            "<header><div class='goal-kicker'><p class='env-tag other'>Unmapped</p></div>"
-            "<h2>Work not hanging under an Azure DevOps goal</h2>"
+            '<article class="goal unmapped" data-goal="unmapped">'
+            "<header><div class='goal-heading'><span class='kind'>Unmapped</span>"
+            "<h2>Work not hanging under an Azure DevOps goal</h2></div>"
             "<p class='lede'>GitHub epics and tasks that could not be matched by title to the ADO roadmap.</p>"
             "</header>"
             f'<div class="epics">{epic_html}'
@@ -224,8 +233,6 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       --pf-red-dark: #a60000;
       --pf-link: #06c;
       --pf-radius: 3px;
-      --hwqa: #2b9af3;
-      --hwprod: #c9190b;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -322,7 +329,9 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
     }}
     main {{ display: grid; gap: 16px; }}
     .goal header {{ padding: 16px 20px 12px; }}
-    .goal-kicker {{ display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }}
+    .goal-heading {{
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 8px;
+    }}
     .seq {{
       display: inline-flex; align-items: center; justify-content: center;
       min-width: 1.7em; height: 1.7em; padding: 0 6px;
@@ -330,17 +339,10 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       background: var(--pf-black); color: #fff;
       font-size: 12px; font-weight: 700;
     }}
-    .goal h2 {{ margin: 0 0 8px; font-size: 20px; font-weight: 500; }}
+    .goal-heading h2 {{ margin: 0; font-size: 20px; font-weight: 500; }}
     .goal-meta {{ display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--pf-muted); font-size: 13px; }}
     .goal-progress {{ display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; margin-top: 12px; }}
     .pct {{ font-size: 24px; font-weight: 700; color: var(--pf-black); }}
-    .env-tag {{
-      display: inline-block; margin: 0; padding: 2px 8px; border-radius: var(--pf-radius);
-      font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: #fff;
-      background: #6a6e73;
-    }}
-    .env-tag.qa, .env-tag.hwqa {{ background: var(--hwqa); }}
-    .env-tag.prod, .env-tag.hwprod {{ background: var(--hwprod); }}
     .epics {{ padding: 0 8px 12px; }}
     details.epic {{
       border-top: 1px solid var(--pf-line);
@@ -404,6 +406,12 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
     .pill.unknown {{ background: #fff; color: #6a6e73; border-color: var(--pf-line); }}
     .empty-note {{ color: var(--pf-muted); font-style: italic; margin: 8px 12px; }}
     .kids {{ margin-left: 16px; }}
+    .kids > details.epic {{
+      border: 1px solid var(--pf-line);
+      border-radius: var(--pf-radius);
+      margin: 8px 0;
+      background: #fff;
+    }}
     .gaps {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }}
     .gap {{ padding: 16px 20px; }}
     .gap h3 {{ margin: 0 0 8px; font-size: 16px; font-weight: 500; }}
@@ -507,7 +515,6 @@ def report_to_dict(report: ProjectReport) -> dict:
         return {
             "kind": node.kind,
             "title": node.title,
-            "environment": node.environment,
             "order": node.source_order or None,
             "ado_id": node.ado_id or None,
             "ado_state": node.ado_state or None,

@@ -37,16 +37,25 @@ python3 -m toodles --open
 - The CSV is read top to bottom: each `Goal` owns every following `Epic` until the next Goal.
 - Goal order is **manual**: list Azure DevOps IDs from first to last in `goal-order.json`. Goals not listed stay at the end in CSV order.
 - GitHub rows are linked with the `Parent issue` column, so tasks can sit under epics or under other tasks.
-- An ADO epic is matched to a GitHub epic when the titles are equal (case and whitespace insensitive).
+- An ADO epic is matched to GitHub epics when the titles are equal (case and whitespace insensitive), and/or when `aliases.json` maps them.
+- One ADO epic can map to **several GitHub epics**. Their tasks all roll up into that ADO epic and its goal.
+- A GitHub epic can only hang under **one** ADO epic. If two ADO epics claim the same GitHub title, the first one in CSV order keeps it.
 - Unmatched work is listed separately: ADO epics not yet in GitHub, GitHub epics not under a Goal, and orphan tasks with no parent.
 
-If an epic was renamed on one side, add a mapping in `aliases.json`:
+If an epic was renamed, or one ADO epic should collect several GitHub epics, add a mapping in `aliases.json`. Keys are Azure DevOps titles. Values are one GitHub title or a list of GitHub titles:
 
 ```json
 {
-  "Azure DevOps epic title": "GitHub epic title"
+  "Azure DevOps epic title": "GitHub epic title",
+  "Network design": [
+    "Network design",
+    "DNS zones ready",
+    "[qa] Hardware base setup"
+  ]
 }
 ```
+
+Exact title matches still apply even if you also list extra GitHub titles. You only need to list the GitHub names that differ.
 
 Goal sequence:
 
@@ -56,7 +65,7 @@ Goal sequence:
 
 ## What the report counts
 
-Progress is the share of GitHub **tasks / bugs** that are closed, rolled up to epic and goal. Azure DevOps Goal/Epic state is shown as a status badge but is not mixed into the percentage. Epics that exist only in Azure DevOps appear in the tree with “No GitHub tasks yet”. Sync-test, Dependabot and similar noise issues are excluded.
+Progress is the share of GitHub **tasks / bugs** that are closed, rolled up to epic and goal. When several GitHub epics map to one ADO epic, their tasks are counted together. Azure DevOps Goal/Epic state is shown as a status badge but is not mixed into the percentage. Epics that exist only in Azure DevOps appear in the tree with “No GitHub tasks yet”. Sync-test, Dependabot and similar noise issues are excluded.
 
 ## Expected export columns
 
