@@ -15,7 +15,7 @@ Put local exports in `input/` (this folder is gitignored):
 input/
   roadmap.csv          # Azure DevOps export
   tracker.tsv          # GitHub export
-  aliases.json         # optional title mapping
+  aliases.json         # optional title mapping (also aliases-multi.json)
   goal-order.json      # optional goal ID order
 ```
 
@@ -23,7 +23,7 @@ input/
 python3 -m toodles
 ```
 
-If you omit `--ado` / `--github`, the newest `*.csv` and `*.tsv` in `input/` (or the current directory) are used. `input/aliases.json` and `input/goal-order.json` are picked up automatically when present.
+If you omit `--ado` / `--github`, the newest `*.csv` and `*.tsv` in `input/` (or the current directory) are used. Alias files (`aliases.json`, `aliases-multi.json`, or another `*alias*.json`) and `input/goal-order.json` are picked up automatically when present. If several alias files exist, `aliases.json` wins; pass `--aliases PATH` to choose another.
 
 ```bash
 python3 -m toodles --format markdown -o output/status.md

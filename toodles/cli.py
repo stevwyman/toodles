@@ -37,6 +37,24 @@ def _optional_config(cwd: Path, explicit: Path | None, filename: str) -> Path | 
     return None
 
 
+def _alias_candidates(cwd: Path) -> list[Path]:
+    """Find alias JSON files. Prefer aliases.json, then other *alias*.json names."""
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for folder in (cwd / "input", cwd):
+        if not folder.is_dir():
+            continue
+        for path in sorted(folder.glob("*alias*.json")):
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            found.append(path)
+    exact = [path for path in found if path.name == "aliases.json"]
+    rest = [path for path in found if path.name != "aliases.json"]
+    return exact + rest
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -50,7 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--aliases",
         type=Path,
         help="Optional JSON file mapping Azure DevOps epic titles to one GitHub title "
-        "or a list of GitHub titles (default: input/aliases.json or aliases.json if present)",
+        "or a list of GitHub titles (default: input/aliases.json, aliases-multi.json, "
+        "or another *alias*.json if present)",
     )
     parser.add_argument(
         "--goal-order",
@@ -94,7 +113,19 @@ def resolve_goal_order(args: argparse.Namespace, cwd: Path) -> Path | None:
 
 
 def resolve_aliases(args: argparse.Namespace, cwd: Path) -> Path | None:
-    return _optional_config(cwd, args.aliases, "aliases.json")
+    if args.aliases is not None:
+        if not args.aliases.exists():
+            raise SystemExit(f"File not found: {args.aliases}")
+        return args.aliases
+    candidates = _alias_candidates(cwd)
+    return candidates[0] if candidates else None
+
+
+def unused_alias_files(chosen: Path | None, cwd: Path) -> list[Path]:
+    if chosen is None:
+        return []
+    chosen_resolved = chosen.resolve()
+    return [path for path in _alias_candidates(cwd) if path.resolve() != chosen_resolved]
 
 
 def default_output(fmt: str) -> Path:
@@ -116,7 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     cwd = Path.cwd()
     ado_path, github_path = resolve_inputs(args, cwd)
-    aliases = load_aliases(resolve_aliases(args, cwd))
+    aliases_path = resolve_aliases(args, cwd)
+    aliases = load_aliases(aliases_path)
     goal_order = load_goal_order(resolve_goal_order(args, cwd))
     report = merge_project(
         parse_ado_csv(ado_path),
@@ -138,6 +170,17 @@ def main(argv: list[str] | None = None) -> int:
         output.write_text(body, encoding="utf-8")
 
     print(f"Wrote {output}", file=sys.stderr)
+    if aliases_path is not None:
+        print(f"Aliases {aliases_path}", file=sys.stderr)
+        leftover = unused_alias_files(aliases_path, cwd)
+        if leftover:
+            names = ", ".join(str(path) for path in leftover)
+            print(
+                f"Note: not loading {names}. Pass --aliases PATH to use a different file.",
+                file=sys.stderr,
+            )
+    else:
+        print("Aliases none", file=sys.stderr)
     print(
         f"Matched {report.matched_epics} epics · "
         f"{len(report.ado_without_github)} ADO-only · "
