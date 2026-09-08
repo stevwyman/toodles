@@ -107,10 +107,10 @@ class Node:
 
     @property
     def display_status(self) -> str:
-        if self.github_status:
-            return self.github_status
         if self.ado_state:
             return self.ado_state
+        if self.github_status:
+            return self.github_status
         if self.closed_at:
             return "Closed"
         return ""

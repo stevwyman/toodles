@@ -8,6 +8,27 @@ from pathlib import Path
 from toodles.merge import ProjectReport
 from toodles.models import Node, Progress
 
+# Workflow order for epic rows in the HTML report (display status, casefolded).
+STATUS_SORT_RANK = {
+    "new": 0,
+    "analyse": 1,
+    "analyze": 1,
+    "needs refinement": 1,
+    "ready": 2,
+    "planned": 2,
+    "to do": 2,
+    "todo": 2,
+    "active": 3,
+    "in progress": 3,
+    "in review": 4,
+    "waiting": 4,
+    "blocked": 4,
+    "resolved": 5,
+    "closed": 6,
+    "done": 6,
+    "completed": 6,
+}
+
 BUCKET_LABELS = {
     "done": "Done",
     "review": "In review",
@@ -44,6 +65,19 @@ def _bar(progress: Progress) -> str:
             f'<i class="seg {bucket}" style="width:{width:.2f}%" title="{escape(label)}: {count}"></i>'
         )
     return f'<div class="bar">{"".join(segments)}</div>'
+
+
+def _status_sort_key(node: Node) -> tuple:
+    label = (node.ado_state or node.display_status or "").strip().casefold()
+    rank = STATUS_SORT_RANK.get(label, 7)
+    return (rank, node.title.casefold())
+
+
+def _sorted_epics(nodes: list[Node]) -> list[Node]:
+    epics = [node for node in nodes if node.kind == "Epic"]
+    rest = [node for node in nodes if node.kind != "Epic"]
+    epics.sort(key=_status_sort_key)
+    return epics + rest
 
 
 def _status_pill(node: Node) -> str:
@@ -90,7 +124,7 @@ def _render_epic_children(nodes: list[Node]) -> str:
     if not nodes:
         return '<p class="empty-note">No GitHub tasks linked to this epic yet.</p>'
     parts: list[str] = []
-    for child in nodes:
+    for child in _sorted_epics(nodes):
         if child.kind == "Epic":
             parts.append(_render_epic(child))
         else:
@@ -118,12 +152,14 @@ def _render_epic(epic: Node) -> str:
 
 def _render_goal(goal: Node) -> str:
     progress = goal.progress()
-    epics = "".join(_render_epic(epic) for epic in goal.children)
+    epics = "".join(_render_epic(epic) for epic in _sorted_epics(goal.children))
     assignee = goal.ado_assignee.split("<")[0].strip().rstrip(",")
     return (
         f'<article class="goal" data-goal="{goal.source_order}" '
         f'data-title="{escape(goal.title.casefold())}" data-order="{goal.source_order}">'
-        f'<header><div class="goal-heading">'
+        f'<details class="goal-fold" open>'
+        f"<summary><div class='goal-summary'>"
+        f'<div class="goal-heading">'
         f'<span class="seq" title="Manual goal order from goal-order.json">{goal.source_order}</span>'
         f'<span class="kind">Goal</span>'
         f'<h2>{escape(goal.title)}</h2>'
@@ -136,9 +172,9 @@ def _render_goal(goal: Node) -> str:
         f"<span>{progress.done}/{progress.total} GitHub tasks closed</span>"
         f"</div>"
         f'<div class="goal-progress"><div class="pct">{_pct(progress)}</div>{_bar(progress)}</div>'
-        f"</header>"
+        f"</div></summary>"
         f'<div class="epics">{epics}</div>'
-        f"</article>"
+        f"</details></article>"
     )
 
 
@@ -200,17 +236,20 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
     goals = "".join(_render_goal(goal) for goal in report.goals)
     unmapped = ""
     if report.unmapped_epics or report.orphan_tasks:
-        epic_html = "".join(_render_epic(epic) for epic in report.unmapped_epics)
+        epic_html = "".join(_render_epic(epic) for epic in _sorted_epics(report.unmapped_epics))
         orphans = "".join(_render_task(task, 0) for task in report.orphan_tasks)
         unmapped = (
-            '<article class="goal unmapped" data-goal="unmapped">'
-            "<header><div class='goal-heading'><span class='kind'>Unmapped</span>"
+            '<article class="goal unmapped" data-goal="unmapped" '
+            'data-title="unmapped work not hanging under an azure devops goal">'
+            '<details class="goal-fold" open>'
+            "<summary><div class='goal-summary'>"
+            "<div class='goal-heading'><span class='kind'>Unmapped</span>"
             "<h2>Work not hanging under an Azure DevOps goal</h2></div>"
             "<p class='lede'>GitHub epics and tasks that could not be matched by title to the ADO roadmap.</p>"
-            "</header>"
+            "</div></summary>"
             f'<div class="epics">{epic_html}'
             + (f'<h3 class="orphan-head">Orphan tasks</h3>{orphans}' if report.orphan_tasks else "")
-            + "</div></article>"
+            + "</div></details></article>"
         )
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -328,7 +367,12 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       overflow: hidden; margin-top: 8px;
     }}
     main {{ display: grid; gap: 16px; }}
-    .goal header {{ padding: 16px 20px 12px; }}
+    details.goal-fold > summary {{
+      display: flex; align-items: flex-start; padding: 16px 20px 12px;
+    }}
+    details.goal-fold > summary .goal-summary {{ flex: 1; min-width: 0; }}
+    details.epic > summary {{ display: flex; align-items: flex-start; }}
+    details.epic > summary .epic-head {{ flex: 1; min-width: 0; }}
     .goal-heading {{
       display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 8px;
     }}
@@ -356,16 +400,19 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       padding: 6px 10px;
     }}
     summary {{ cursor: pointer; list-style: none; }}
-    summary::-webkit-details-marker {{ display: none; }}
+    summary::-webkit-details-marker, summary::marker {{ display: none; content: none; }}
     summary::before {{
       content: "";
       display: inline-block;
+      flex: none;
       width: 0; height: 0;
-      margin-right: 8px;
+      margin: 0.55em 8px 0 0;
       border-top: 5px solid transparent;
       border-bottom: 5px solid transparent;
       border-left: 6px solid #6a6e73;
-      transform: translateY(-1px);
+    }}
+    details.task > summary::before {{
+      margin-top: 0.4em;
     }}
     details[open] > summary::before {{
       border-left: 5px solid transparent;
@@ -442,7 +489,7 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
         Generated {escape(generated_at.strftime("%d %b %Y, %H:%M UTC"))}.
         {report.matched_epics} epics matched across both systems.</p>
       <div class="toolbar">
-        <input id="search" type="search" placeholder="Filter by title">
+        <input id="search" type="search" placeholder="Filter by goal, epic or task title">
         <select id="goal">
           <option value="All">All goals</option>
           {goal_options}
@@ -467,27 +514,49 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
   <script>
     const search = document.getElementById("search");
     const goalFilter = document.getElementById("goal");
+    function titleOf(el) {{
+      return (el.dataset.title || "").toLowerCase();
+    }}
+    function matchesQuery(el, q) {{
+      if (!q) return true;
+      if (titleOf(el).includes(q)) return true;
+      return [...el.querySelectorAll("[data-title]")].some((n) => titleOf(n).includes(q));
+    }}
     function applyFilter() {{
       const q = (search.value || "").trim().toLowerCase();
       const selected = goalFilter.value;
       document.querySelectorAll("article.goal").forEach((goal) => {{
         const goalOk = selected === "All" || goal.dataset.goal === selected;
-        const titleOk = !q || goal.dataset.title.includes(q) ||
-          [...goal.querySelectorAll("[data-title]")].some((n) => n.dataset.title.includes(q));
-        goal.classList.toggle("hidden", !(goalOk && titleOk));
-        if (q) {{
-          goal.querySelectorAll("details").forEach((d) => {{
-            const hit = (d.dataset.title || "").includes(q) || d.querySelector("[data-title]") &&
-              [...d.querySelectorAll("[data-title]")].some((n) => n.dataset.title.includes(q));
-            if (hit) d.open = true;
-          }});
+        const showGoal = goalOk && matchesQuery(goal, q);
+        goal.classList.toggle("hidden", !showGoal);
+        const nodes = [...goal.querySelectorAll("details")].filter(
+          (d) => !d.classList.contains("goal-fold")
+        );
+        if (!q) {{
+          nodes.forEach((d) => d.classList.remove("hidden"));
+          return;
         }}
+        const selfHits = nodes.filter((d) => titleOf(d).includes(q));
+        nodes.forEach((d) => {{
+          const covered = selfHits.some((hit) => hit === d || hit.contains(d));
+          const onPath = matchesQuery(d, q);
+          const show = covered || onPath;
+          d.classList.toggle("hidden", !show);
+          if (show) d.open = true;
+        }});
       }});
       document.querySelectorAll(".gaps").forEach((el) => {{
-        el.classList.toggle("hidden", selected !== "All");
+        el.classList.toggle("hidden", selected !== "All" || Boolean(q));
       }});
       document.querySelectorAll(".summary-card[data-goal]").forEach((card) => {{
-        card.classList.toggle("selected", card.dataset.goal === selected);
+        const key = card.dataset.goal;
+        card.classList.toggle("selected", key === selected);
+        if (key === "All" || !q) {{
+          card.classList.remove("hidden");
+          return;
+        }}
+        const goalEl = document.querySelector(`article.goal[data-goal="${{key}}"]`);
+        card.classList.toggle("hidden", !goalEl || goalEl.classList.contains("hidden"));
       }});
     }}
     search.addEventListener("input", applyFilter);

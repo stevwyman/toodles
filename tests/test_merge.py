@@ -4,8 +4,9 @@ import unittest
 from pathlib import Path
 
 from toodles.merge import merge_project
-from toodles.models import normalize_title
+from toodles.models import Node, normalize_title
 from toodles.parse import load_aliases, load_goal_order, normalize_alias_map, parse_ado_csv, parse_github_tsv
+from toodles.report_html import _sorted_epics, render_html
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ADO = FIXTURES / "ado.csv"
@@ -111,6 +112,49 @@ class MergeTests(unittest.TestCase):
             normalize_alias_map({"An ADO epic": 12})
         with self.assertRaises(ValueError):
             normalize_alias_map({"An ADO epic": ["GitHub epic", 3]})
+
+    def test_matched_epic_uses_csv_state_not_github_status(self) -> None:
+        report = merge_project(parse_ado_csv(ADO), parse_github_tsv(GITHUB))
+        designs = next(
+            epic
+            for goal in report.goals
+            for epic in goal.children
+            if "High-level designs" in epic.title
+        )
+        self.assertEqual(designs.ado_state, "Active")
+        self.assertEqual(designs.display_status, "Active")
+        self.assertEqual(designs.github_status, "")
+        html = render_html(report)
+        snippet = html[html.index("High-level designs complete") :][:400]
+        self.assertIn(">Active</span>", snippet)
+        self.assertNotIn(">In Progress</span>", snippet)
+
+    def test_html_sorts_epics_by_workflow_status(self) -> None:
+        nodes = [
+            Node(key="c", kind="Epic", title="Closed one", github_status="Closed"),
+            Node(key="n", kind="Epic", title="New one", ado_state="New"),
+            Node(key="a", kind="Epic", title="Active one", ado_state="Active"),
+            Node(key="r", kind="Epic", title="Ready one", github_status="Ready"),
+            Node(key="x", kind="Epic", title="Analyse one", github_status="Needs Refinement"),
+            Node(key="s", kind="Epic", title="Resolved one", ado_state="Resolved"),
+        ]
+        self.assertEqual(
+            [node.title for node in _sorted_epics(nodes)],
+            [
+                "New one",
+                "Analyse one",
+                "Ready one",
+                "Active one",
+                "Resolved one",
+                "Closed one",
+            ],
+        )
+
+    def test_html_goals_are_collapsible(self) -> None:
+        html = render_html(merge_project(parse_ado_csv(ADO), parse_github_tsv(GITHUB)))
+        self.assertIn('class="goal-fold"', html)
+        self.assertIn("<article class=\"goal\"", html)
+        self.assertGreater(html.count("<details class=\"epic\""), 3)
 
 
 if __name__ == "__main__":

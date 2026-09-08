@@ -90,9 +90,7 @@ def _attach_github_epics(epic: Node, matches: list[Node], claimed: set[str]) -> 
     if len(available) == 1:
         gh_epic = available[0]
         epic.github_url = gh_epic.github_url
-        epic.github_status = gh_epic.github_status
         epic.github_number = gh_epic.github_number
-        epic.closed_at = gh_epic.closed_at
         epic.updated_at = gh_epic.updated_at
         epic.children = gh_epic.children
     else:
