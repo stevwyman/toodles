@@ -148,7 +148,8 @@ class MergeTests(unittest.TestCase):
             ["Planned", "Ready", "In Progress", "Closed"],
         )
         html = render_html(report)
-        self.assertIn('id="status-filter-on"', html)
+        self.assertIn("<span>All</span>", html)
+        self.assertIn("setAllStatuses", html)
         self.assertIn('name="work-status"', html)
         self.assertIn('value="closed"', html)
         self.assertIn('value="in progress"', html)

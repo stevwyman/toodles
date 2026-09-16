@@ -232,12 +232,12 @@ def _status_filter_controls(statuses: list[str]) -> str:
             f"<span>{escape(status)}</span></label>"
         )
     return (
-        '<fieldset class="status-filter on">'
+        '<fieldset class="status-filter">'
         "<legend>Show tasks and bugs</legend>"
         '<label class="status-switch">'
         '<input id="status-filter-on" type="checkbox" checked>'
         '<span class="switch-ui" aria-hidden="true"></span>'
-        "<span>Filter by status</span>"
+        "<span>All</span>"
         "</label>"
         f'<div class="status-chips">{"".join(boxes)}</div>'
         "</fieldset>"
@@ -427,9 +427,6 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       outline-offset: 2px;
     }}
     .status-chips {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }}
-    .status-filter:not(.on) .status-chips {{
-      opacity: 0.45; pointer-events: none;
-    }}
     .status-chip {{
       display: inline-flex; align-items: center; gap: 6px;
       font-size: 13px; cursor: pointer; user-select: none;
@@ -628,13 +625,13 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
     const search = document.getElementById("search");
     const goalFilter = document.getElementById("goal");
     const statusFilterOn = document.getElementById("status-filter-on");
-    const statusFilter = document.querySelector(".status-filter");
     const statusBoxes = [...document.querySelectorAll('.status-filter input[name="work-status"]')];
-    function setStatusFilterEnabled() {{
-      const on = Boolean(statusFilterOn && statusFilterOn.checked);
-      if (statusFilter) statusFilter.classList.toggle("on", on);
-      statusBoxes.forEach((box) => {{ box.disabled = !on; }});
-      return on;
+    function syncMaster() {{
+      if (statusFilterOn) statusFilterOn.checked = statusBoxes.length > 0 && statusBoxes.every((box) => box.checked);
+    }}
+    function setAllStatuses(on) {{
+      statusBoxes.forEach((box) => {{ box.checked = on; }});
+      if (statusFilterOn) statusFilterOn.checked = on;
     }}
     function titleOf(el) {{
       return (el.dataset.title || "").toLowerCase();
@@ -653,9 +650,8 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       const q = (search.value || "").trim().toLowerCase();
       const selected = goalFilter.value;
       const kind = selected === "bugs" ? "Bug" : "";
-      const statusEnabled = setStatusFilterEnabled();
       const statuses = new Set(statusBoxes.filter((box) => box.checked).map((box) => box.value));
-      const statusActive = statusEnabled && statusBoxes.some((box) => !box.checked);
+      const statusActive = statusBoxes.some((box) => !box.checked);
       function statusOk(el) {{
         if (!statusActive) return true;
         if (el.classList.contains("task") && statuses.has(el.dataset.workStatus || "")) return true;
@@ -717,11 +713,18 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
     }}
     search.addEventListener("input", applyFilter);
     goalFilter.addEventListener("change", applyFilter);
-    if (statusFilterOn) statusFilterOn.addEventListener("change", applyFilter);
+    if (statusFilterOn) {{
+      statusFilterOn.addEventListener("change", () => {{
+        setAllStatuses(statusFilterOn.checked);
+        applyFilter();
+      }});
+    }}
     statusBoxes.forEach((box) => {{
-      box.addEventListener("change", applyFilter);
+      box.addEventListener("change", () => {{
+        syncMaster();
+        applyFilter();
+      }});
     }});
-    setStatusFilterEnabled();
     document.querySelectorAll(".summary-card[data-goal]").forEach((card) => {{
       card.addEventListener("click", () => {{
         goalFilter.value = card.dataset.goal;
