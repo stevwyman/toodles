@@ -6,7 +6,7 @@ from pathlib import Path
 from toodles.merge import merge_project
 from toodles.models import Node, normalize_title
 from toodles.parse import load_aliases, load_goal_order, normalize_alias_map, parse_ado_csv, parse_github_tsv
-from toodles.report_html import _sorted_epics, render_html
+from toodles.report_html import _sorted_epics, _work_item_statuses, render_html
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ADO = FIXTURES / "ado.csv"
@@ -139,6 +139,21 @@ class MergeTests(unittest.TestCase):
         self.assertIn("1 of 2 bugs closed", html)
         self.assertIn('<option value="bugs">Bugs</option>', html)
         self.assertIn('data-kind="Bug"', html)
+        self.assertIn('card.classList.toggle("hidden", key !== selected)', html)
+
+    def test_html_has_task_and_bug_status_checkboxes(self) -> None:
+        report = merge_project(parse_ado_csv(ADO), parse_github_tsv(GITHUB))
+        self.assertEqual(
+            _work_item_statuses(report),
+            ["Planned", "Ready", "In Progress", "Closed"],
+        )
+        html = render_html(report)
+        self.assertIn('id="status-filter-on"', html)
+        self.assertIn('name="work-status"', html)
+        self.assertIn('value="closed"', html)
+        self.assertIn('value="in progress"', html)
+        self.assertIn('data-work-status="planned"', html)
+        self.assertIn('data-work-status="closed"', html)
 
     def test_html_sorts_epics_by_workflow_status(self) -> None:
         nodes = [

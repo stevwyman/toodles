@@ -67,6 +67,20 @@ def _bar(progress: Progress, empty: str = "No GitHub tasks yet") -> str:
     return f'<div class="bar">{"".join(segments)}</div>'
 
 
+def _work_status_label(node: Node) -> str:
+    return (node.display_status or "").strip() or "No status"
+
+
+def _work_item_statuses(report: ProjectReport) -> list[str]:
+    labels: dict[str, str] = {}
+    for item in report.work_items():
+        if item.kind not in {"Task", "Bug"}:
+            continue
+        label = _work_status_label(item)
+        labels.setdefault(label.casefold(), label)
+    return sorted(labels.values(), key=lambda label: (STATUS_SORT_RANK.get(label.casefold(), 7), label.casefold()))
+
+
 def _status_sort_key(node: Node) -> tuple:
     label = (node.ado_state or node.display_status or "").strip().casefold()
     rank = STATUS_SORT_RANK.get(label, 7)
@@ -113,7 +127,8 @@ def _render_task(node: Node, depth: int) -> str:
     body = f'<div class="kids">{nested}</div>' if nested else ""
     return (
         f'<details class="task depth-{depth}" data-kind="{escape(node.kind)}" '
-        f'data-status="{escape(node.bucket)}" data-title="{escape(node.title.casefold())}"{open_attr}>'
+        f'data-status="{escape(node.bucket)}" data-work-status="{escape(_work_status_label(node).casefold())}" '
+        f'data-title="{escape(node.title.casefold())}"{open_attr}>'
         f"<summary><span class='kind'>{escape(node.kind)}</span>"
         f"<span class='name'>{title}</span>{_status_pill(node)}</summary>"
         f"{body}</details>"
@@ -204,6 +219,29 @@ def _legend() -> str:
     for bucket, label in BUCKET_LABELS.items():
         chips.append(f'<span class="pill {bucket}">{escape(label)}</span>')
     return "".join(chips)
+
+
+def _status_filter_controls(statuses: list[str]) -> str:
+    if not statuses:
+        return ""
+    boxes = []
+    for status in statuses:
+        value = escape(status.casefold())
+        boxes.append(
+            f'<label class="status-chip"><input type="checkbox" name="work-status" value="{value}" checked>'
+            f"<span>{escape(status)}</span></label>"
+        )
+    return (
+        '<fieldset class="status-filter on">'
+        "<legend>Show tasks and bugs</legend>"
+        '<label class="status-switch">'
+        '<input id="status-filter-on" type="checkbox" checked>'
+        '<span class="switch-ui" aria-hidden="true"></span>'
+        "<span>Filter by status</span>"
+        "</label>"
+        f'<div class="status-chips">{"".join(boxes)}</div>'
+        "</fieldset>"
+    )
 
 
 def _summary_card(
@@ -336,7 +374,7 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
       margin: 0 0 12px;
     }}
-    .toolbar input, .toolbar select {{
+    .toolbar input[type="search"], .toolbar select {{
       font: 14px/1.4 "Red Hat Text", Helvetica, Arial, sans-serif;
       border: 1px solid var(--pf-line);
       background: #fff;
@@ -345,14 +383,67 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       color: var(--pf-ink);
       min-height: 36px;
     }}
-    .toolbar input {{ min-width: 220px; }}
+    .toolbar input[type="search"] {{ min-width: 220px; }}
     .toolbar select {{ min-width: min(420px, 100%); max-width: 100%; }}
     .summary-card[data-goal] {{ cursor: pointer; }}
     .summary-card.selected {{ box-shadow: inset 0 0 0 2px var(--pf-link); }}
-    .toolbar input:focus, .toolbar select:focus {{
+    .toolbar input[type="search"]:focus, .toolbar select:focus {{
       outline: 2px solid var(--pf-link);
       outline-offset: 2px;
       border-color: var(--pf-link);
+    }}
+    .status-filter {{
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      border: 0; margin: 0 0 12px; padding: 0;
+    }}
+    .status-filter legend {{
+      float: left; width: auto; padding: 0; margin: 0 8px 0 0;
+      font-size: 12px; font-weight: 500; letter-spacing: 0.04em;
+      text-transform: uppercase; color: var(--pf-muted);
+    }}
+    .status-switch {{
+      position: relative;
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 13px; cursor: pointer; user-select: none;
+      margin-right: 4px;
+    }}
+    .status-switch input {{
+      position: absolute; inset: 0; opacity: 0; margin: 0;
+      width: 100%; height: 100%; cursor: pointer;
+    }}
+    .switch-ui {{
+      display: inline-block; width: 36px; height: 20px; flex: none;
+      border-radius: 10px; background: #8a8d90; position: relative;
+      pointer-events: none;
+    }}
+    .switch-ui::after {{
+      content: ""; position: absolute; top: 2px; left: 2px;
+      width: 16px; height: 16px; border-radius: 50%; background: #fff;
+    }}
+    .status-switch input:checked + .switch-ui {{ background: var(--pf-link); }}
+    .status-switch input:checked + .switch-ui::after {{ left: 18px; }}
+    .status-switch:focus-within .switch-ui {{
+      outline: 2px solid var(--pf-link);
+      outline-offset: 2px;
+    }}
+    .status-chips {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }}
+    .status-filter:not(.on) .status-chips {{
+      opacity: 0.45; pointer-events: none;
+    }}
+    .status-chip {{
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 13px; cursor: pointer; user-select: none;
+      border: 1px solid var(--pf-line); border-radius: var(--pf-radius);
+      background: #fff; padding: 4px 10px; min-height: 32px;
+      white-space: nowrap;
+    }}
+    .status-chip:has(input:not(:checked)) {{
+      background: #f0f0f0; color: var(--pf-muted);
+    }}
+    .status-chip input {{ margin: 0; }}
+    .status-chip:focus-within {{
+      outline: 2px solid var(--pf-link);
+      outline-offset: 2px;
     }}
     .legend {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 20px; }}
     .summary {{
@@ -488,7 +579,7 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
     .hidden {{ display: none !important; }}
     @media print {{
       .masthead {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-      .toolbar {{ display: none; }}
+      .toolbar, .status-filter {{ display: none; }}
     }}
   </style>
 </head>
@@ -516,6 +607,7 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
           <option value="unmapped">Unmapped work</option>
         </select>
       </div>
+      {_status_filter_controls(_work_item_statuses(report))}
       <div class="legend">{_legend()}</div>
     </div>
     <section class="summary">
@@ -535,6 +627,15 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
   <script>
     const search = document.getElementById("search");
     const goalFilter = document.getElementById("goal");
+    const statusFilterOn = document.getElementById("status-filter-on");
+    const statusFilter = document.querySelector(".status-filter");
+    const statusBoxes = [...document.querySelectorAll('.status-filter input[name="work-status"]')];
+    function setStatusFilterEnabled() {{
+      const on = Boolean(statusFilterOn && statusFilterOn.checked);
+      if (statusFilter) statusFilter.classList.toggle("on", on);
+      statusBoxes.forEach((box) => {{ box.disabled = !on; }});
+      return on;
+    }}
     function titleOf(el) {{
       return (el.dataset.title || "").toLowerCase();
     }}
@@ -552,39 +653,54 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       const q = (search.value || "").trim().toLowerCase();
       const selected = goalFilter.value;
       const kind = selected === "bugs" ? "Bug" : "";
+      const statusEnabled = setStatusFilterEnabled();
+      const statuses = new Set(statusBoxes.filter((box) => box.checked).map((box) => box.value));
+      const statusActive = statusEnabled && statusBoxes.some((box) => !box.checked);
+      function statusOk(el) {{
+        if (!statusActive) return true;
+        if (el.classList.contains("task") && statuses.has(el.dataset.workStatus || "")) return true;
+        return [...el.querySelectorAll("details.task")].some((task) => statuses.has(task.dataset.workStatus || ""));
+      }}
       document.querySelectorAll("article.goal").forEach((goal) => {{
         const goalSelected = selected === "All" || selected === "bugs" || goal.dataset.goal === selected;
         const kindOk = nodeHasKind(goal, kind);
-        const showGoal = goalSelected && kindOk && matchesQuery(goal, q);
+        const statusGoalOk = statusOk(goal) || selected === goal.dataset.goal;
+        const showGoal = goalSelected && kindOk && matchesQuery(goal, q) && statusGoalOk;
         goal.classList.toggle("hidden", !showGoal);
         const nodes = [...goal.querySelectorAll("details")].filter(
           (d) => !d.classList.contains("goal-fold")
         );
-        if (!q && !kind) {{
+        if (!q && !kind && !statusActive) {{
           nodes.forEach((d) => d.classList.remove("hidden"));
           return;
         }}
         const selfHits = q ? nodes.filter((d) => titleOf(d).includes(q)) : [];
         nodes.forEach((d) => {{
           const kindMatch = nodeHasKind(d, kind);
+          const statusMatch = statusOk(d);
           if (!q) {{
-            d.classList.toggle("hidden", !kindMatch);
-            if (kindMatch && kind) d.open = true;
+            const show = kindMatch && statusMatch;
+            d.classList.toggle("hidden", !show);
+            if (show && (kind || statusActive)) d.open = true;
             return;
           }}
           const covered = selfHits.some((hit) => hit === d || hit.contains(d));
           const onPath = matchesQuery(d, q);
-          const show = kindMatch && (covered || onPath);
+          const show = kindMatch && statusMatch && (covered || onPath);
           d.classList.toggle("hidden", !show);
           if (show) d.open = true;
         }});
       }});
       document.querySelectorAll(".gaps").forEach((el) => {{
-        el.classList.toggle("hidden", selected !== "All" || Boolean(q));
+        el.classList.toggle("hidden", selected !== "All" || Boolean(q) || statusActive);
       }});
       document.querySelectorAll(".summary-card[data-goal]").forEach((card) => {{
         const key = card.dataset.goal;
         card.classList.toggle("selected", key === selected);
+        if (selected !== "All") {{
+          card.classList.toggle("hidden", key !== selected);
+          return;
+        }}
         if (key === "All") {{
           card.classList.remove("hidden");
           return;
@@ -592,8 +708,7 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
         if (key === "bugs") {{
           const anyBug = [...document.querySelectorAll("article.goal:not(.hidden) details.task[data-kind='Bug']")]
             .some((d) => !d.classList.contains("hidden"));
-          const keep = selected === "All" || selected === "bugs" ? !q || anyBug : anyBug;
-          card.classList.toggle("hidden", !keep);
+          card.classList.toggle("hidden", (Boolean(q) || statusActive) && !anyBug);
           return;
         }}
         const goalEl = document.querySelector(`article.goal[data-goal="${{key}}"]`);
@@ -602,6 +717,11 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
     }}
     search.addEventListener("input", applyFilter);
     goalFilter.addEventListener("change", applyFilter);
+    if (statusFilterOn) statusFilterOn.addEventListener("change", applyFilter);
+    statusBoxes.forEach((box) => {{
+      box.addEventListener("change", applyFilter);
+    }});
+    setStatusFilterEnabled();
     document.querySelectorAll(".summary-card[data-goal]").forEach((card) => {{
       card.addEventListener("click", () => {{
         goalFilter.value = card.dataset.goal;
