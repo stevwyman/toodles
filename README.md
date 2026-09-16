@@ -65,7 +65,7 @@ Goal sequence:
 
 ## What the report counts
 
-Progress is the share of GitHub **tasks / bugs** that are closed, rolled up to epic and goal. When several GitHub epics map to one ADO epic, their tasks are counted together. Goal and epic status badges use the Azure DevOps CSV `State` column (not the GitHub board status). Task pills still use GitHub status because tasks are not in the CSV. Epics that exist only in Azure DevOps appear in the tree with “No GitHub tasks yet”. Sync-test, Dependabot and similar noise issues are excluded.
+Progress is the share of GitHub **tasks / bugs** that are closed, rolled up to epic and goal. When several GitHub epics map to one ADO epic, their tasks are counted together. GitHub issues typed as **Bug** also get their own summary card (closed vs open), including bugs that sit under a goal and orphan bugs with no parent. Goal and epic status badges use the Azure DevOps CSV `State` column (not the GitHub board status). Task and bug pills still use GitHub status because those items are not in the CSV. Epics that exist only in Azure DevOps appear in the tree with “No GitHub tasks yet”. Sync-test, Dependabot and similar noise issues are excluded.
 
 ## Expected export columns
 

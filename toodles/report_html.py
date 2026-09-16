@@ -52,9 +52,9 @@ def _pct(progress: Progress) -> str:
     return f"{progress.percent:.0f}%"
 
 
-def _bar(progress: Progress) -> str:
+def _bar(progress: Progress, empty: str = "No GitHub tasks yet") -> str:
     if progress.total == 0:
-        return '<div class="bar empty"><span>No GitHub tasks yet</span></div>'
+        return f'<div class="bar empty"><span>{escape(empty)}</span></div>'
     segments = []
     for bucket, label in BUCKET_LABELS.items():
         count = progress.by_bucket.get(bucket, 0)
@@ -206,13 +206,20 @@ def _legend() -> str:
     return "".join(chips)
 
 
-def _summary_card(label: str, progress: Progress, extra: str = "", goal_key: str = "") -> str:
+def _summary_card(
+    label: str,
+    progress: Progress,
+    extra: str = "",
+    goal_key: str = "",
+    unit: str = "tasks",
+    empty: str = "No GitHub tasks yet",
+) -> str:
     attr = f' data-goal="{escape(goal_key)}"' if goal_key else ""
     return (
         f'<div class="summary-card"{attr}><p>{escape(label)}</p>'
         f"<strong>{_pct(progress)}</strong>"
-        f"<span>{progress.done} of {progress.total} tasks closed</span>"
-        f"{_bar(progress)}"
+        f"<span>{progress.done} of {progress.total} {escape(unit)} closed</span>"
+        f"{_bar(progress, empty)}"
         f"{extra}</div>"
     )
 
@@ -220,6 +227,7 @@ def _summary_card(label: str, progress: Progress, extra: str = "", goal_key: str
 def render_html(report: ProjectReport, generated_at: datetime | None = None) -> str:
     generated_at = generated_at or datetime.now(timezone.utc)
     overall = report.overall_progress()
+    bugs = report.bug_progress()
     goal_cards = [
         _summary_card(
             f"Goal {goal.source_order}",
@@ -229,6 +237,14 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
         )
         for goal in report.goals
     ]
+    bug_card = _summary_card(
+        "Bugs",
+        bugs,
+        extra="<span class='goal-title'>GitHub issues typed as Bug</span>",
+        goal_key="bugs",
+        unit="bugs",
+        empty="No GitHub bugs yet",
+    )
     goal_options = "".join(
         f'<option value="{goal.source_order}">{goal.source_order}. {escape(goal.title)}</option>'
         for goal in report.goals
@@ -245,10 +261,10 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
             "<summary><div class='goal-summary'>"
             "<div class='goal-heading'><span class='kind'>Unmapped</span>"
             "<h2>Work not hanging under an Azure DevOps goal</h2></div>"
-            "<p class='lede'>GitHub epics and tasks that could not be matched by title to the ADO roadmap.</p>"
+            "<p class='lede'>GitHub epics, tasks and bugs that could not be matched by title to the ADO roadmap.</p>"
             "</div></summary>"
             f'<div class="epics">{epic_html}'
-            + (f'<h3 class="orphan-head">Orphan tasks</h3>{orphans}' if report.orphan_tasks else "")
+            + (f'<h3 class="orphan-head">Orphan work</h3>{orphans}' if report.orphan_tasks else "")
             + "</div></details></article>"
         )
     return f"""<!DOCTYPE html>
@@ -427,6 +443,9 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase;
       color: var(--pf-muted); border: 1px solid var(--pf-line); border-radius: var(--pf-radius); padding: 1px 6px;
     }}
+    details.task[data-kind="Bug"] .kind {{
+      background: #faeae8; color: #a30000; border-color: #c9190b;
+    }}
     .name {{ font-weight: 500; }}
     .meta {{ color: var(--pf-muted); font-size: 12px; }}
     .bar {{
@@ -478,13 +497,13 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
     <div class="masthead-inner">
       <span class="brand-bar" aria-hidden="true"></span>
       <span class="brand-name">Project status</span>
-      <span class="brand-sub">Goal · Epic · Task</span>
+      <span class="brand-sub">Goal · Epic · Task · Bug</span>
     </div>
   </header>
   <div class="page">
     <div class="page-header">
       <h1>Status by goal</h1>
-      <p class="lede">Merged Azure DevOps goals with GitHub epics and nested tasks.
+      <p class="lede">Merged Azure DevOps goals with GitHub epics, nested tasks and bugs.
         Goals follow the manual order in goal-order.json.
         Generated {escape(generated_at.strftime("%d %b %Y, %H:%M UTC"))}.
         {report.matched_epics} epics matched across both systems.</p>
@@ -493,6 +512,7 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
         <select id="goal">
           <option value="All">All goals</option>
           {goal_options}
+          <option value="bugs">Bugs</option>
           <option value="unmapped">Unmapped work</option>
         </select>
       </div>
@@ -501,6 +521,7 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
     <section class="summary">
       {_summary_card("Overall", overall, f"<span style='display:block;margin-top:8px'>{len(report.goals)} goals · {report.matched_epics} matched epics</span>", goal_key="All")}
       {"".join(goal_cards)}
+      {bug_card}
     </section>
     <main>
       {goals}
@@ -522,25 +543,38 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       if (titleOf(el).includes(q)) return true;
       return [...el.querySelectorAll("[data-title]")].some((n) => titleOf(n).includes(q));
     }}
+    function nodeHasKind(el, kind) {{
+      if (!kind) return true;
+      if (el.dataset.kind === kind) return true;
+      return Boolean(el.querySelector(`details.task[data-kind="${{kind}}"]`));
+    }}
     function applyFilter() {{
       const q = (search.value || "").trim().toLowerCase();
       const selected = goalFilter.value;
+      const kind = selected === "bugs" ? "Bug" : "";
       document.querySelectorAll("article.goal").forEach((goal) => {{
-        const goalOk = selected === "All" || goal.dataset.goal === selected;
-        const showGoal = goalOk && matchesQuery(goal, q);
+        const goalSelected = selected === "All" || selected === "bugs" || goal.dataset.goal === selected;
+        const kindOk = nodeHasKind(goal, kind);
+        const showGoal = goalSelected && kindOk && matchesQuery(goal, q);
         goal.classList.toggle("hidden", !showGoal);
         const nodes = [...goal.querySelectorAll("details")].filter(
           (d) => !d.classList.contains("goal-fold")
         );
-        if (!q) {{
+        if (!q && !kind) {{
           nodes.forEach((d) => d.classList.remove("hidden"));
           return;
         }}
-        const selfHits = nodes.filter((d) => titleOf(d).includes(q));
+        const selfHits = q ? nodes.filter((d) => titleOf(d).includes(q)) : [];
         nodes.forEach((d) => {{
+          const kindMatch = nodeHasKind(d, kind);
+          if (!q) {{
+            d.classList.toggle("hidden", !kindMatch);
+            if (kindMatch && kind) d.open = true;
+            return;
+          }}
           const covered = selfHits.some((hit) => hit === d || hit.contains(d));
           const onPath = matchesQuery(d, q);
-          const show = covered || onPath;
+          const show = kindMatch && (covered || onPath);
           d.classList.toggle("hidden", !show);
           if (show) d.open = true;
         }});
@@ -551,8 +585,15 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
       document.querySelectorAll(".summary-card[data-goal]").forEach((card) => {{
         const key = card.dataset.goal;
         card.classList.toggle("selected", key === selected);
-        if (key === "All" || !q) {{
+        if (key === "All") {{
           card.classList.remove("hidden");
+          return;
+        }}
+        if (key === "bugs") {{
+          const anyBug = [...document.querySelectorAll("article.goal:not(.hidden) details.task[data-kind='Bug']")]
+            .some((d) => !d.classList.contains("hidden"));
+          const keep = selected === "All" || selected === "bugs" ? !q || anyBug : anyBug;
+          card.classList.toggle("hidden", !keep);
           return;
         }}
         const goalEl = document.querySelector(`article.goal[data-goal="${{key}}"]`);
@@ -600,11 +641,18 @@ def report_to_dict(report: ProjectReport) -> dict:
         }
 
     overall = report.overall_progress()
+    bugs = report.bug_progress()
     return {
         "overall": {
             "done": overall.done,
             "total": overall.total,
             "percent": round(overall.percent, 1),
+        },
+        "bugs": {
+            "done": bugs.done,
+            "total": bugs.total,
+            "percent": round(bugs.percent, 1),
+            "by_status": bugs.by_bucket,
         },
         "matched_epics": report.matched_epics,
         "goals": [node_dict(goal) for goal in report.goals],

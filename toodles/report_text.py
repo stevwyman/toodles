@@ -27,6 +27,11 @@ def render_markdown(report: ProjectReport) -> str:
     for goal in report.goals:
         progress = _goal_progress(goal)
         lines.append(f"- **{goal.source_order}. {goal.title}**: {_progress_line(progress)}")
+    bugs = report.bug_progress()
+    if bugs.total:
+        lines.append(f"- **Bugs**: {bugs.done}/{bugs.total} ({bugs.percent:.0f}%)")
+    else:
+        lines.append("- **Bugs**: none")
     lines.append("")
 
     for goal in report.goals:
@@ -91,11 +96,18 @@ def _append_tasks(lines: list[str], nodes: list[Node], depth: int) -> None:
 
 def render_text(report: ProjectReport) -> str:
     overall = report.overall_progress()
+    bugs = report.bug_progress()
+    bug_line = (
+        f"Bugs: {bugs.done}/{bugs.total} ({bugs.percent:.0f}%) closed"
+        if bugs.total
+        else "Bugs: none"
+    )
     lines = [
         "Project status",
         "=" * 14,
         f"Overall {_progress_line(overall)} tasks closed",
         f"Matched epics: {report.matched_epics}",
+        bug_line,
         "Goals follow the manual order in goal-order.json",
         "",
     ]

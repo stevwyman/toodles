@@ -129,6 +129,17 @@ class MergeTests(unittest.TestCase):
         self.assertIn(">Active</span>", snippet)
         self.assertNotIn(">In Progress</span>", snippet)
 
+    def test_html_includes_a_bugs_summary_card(self) -> None:
+        report = merge_project(parse_ado_csv(ADO), parse_github_tsv(GITHUB))
+        bugs = report.bug_progress()
+        self.assertEqual(bugs.total, 2)
+        self.assertEqual(bugs.done, 1)
+        html = render_html(report)
+        self.assertIn('data-goal="bugs"', html)
+        self.assertIn("1 of 2 bugs closed", html)
+        self.assertIn('<option value="bugs">Bugs</option>', html)
+        self.assertIn('data-kind="Bug"', html)
+
     def test_html_sorts_epics_by_workflow_status(self) -> None:
         nodes = [
             Node(key="c", kind="Epic", title="Closed one", github_status="Closed"),

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from toodles.models import Node, Progress, normalize_title
+from toodles.models import Node, Progress, is_done, normalize_title
 from toodles.parse import link_github_children, normalize_alias_map
 
 
@@ -28,6 +28,27 @@ class ProjectReport:
         result = Progress()
         for goal in self.goals:
             result.merge(goal.progress())
+        return result
+
+    def work_items(self) -> list[Node]:
+        items: list[Node] = []
+        seen: set[str] = set()
+        roots = [*self.goals, *self.unmapped_epics, *self.orphan_tasks]
+        for root in roots:
+            include_self = root.kind in {"Task", "Bug", "Issue"}
+            for item in root.work_items(include_self=include_self):
+                if item.key in seen:
+                    continue
+                seen.add(item.key)
+                items.append(item)
+        return items
+
+    def bug_progress(self) -> Progress:
+        result = Progress()
+        for item in self.work_items():
+            if item.kind != "Bug":
+                continue
+            result.add(item.bucket, is_done(item.display_status, item.closed_at))
         return result
 
 
