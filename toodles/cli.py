@@ -6,6 +6,8 @@ import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
+from toodles.briefing import generate_briefing
+from toodles.history import discover_github_export
 from toodles.merge import merge_project
 from toodles.parse import load_aliases, load_goal_order, parse_ado_csv, parse_github_tsv
 from toodles.report_html import render_html, render_json, write_html
@@ -91,20 +93,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--stdout", action="store_true", help="Write the report to stdout instead of a file")
     parser.add_argument("--open", action="store_true", help="Open the HTML report in a browser after writing")
+    parser.add_argument(
+        "--no-summary",
+        action="store_true",
+        help="Skip the folded status summary and charts",
+    )
     return parser
 
 
 def resolve_inputs(args: argparse.Namespace, cwd: Path) -> tuple[Path, Path]:
     ado = args.ado or discover_export(cwd, "*.csv")
-    github = args.github or discover_export(cwd, "*.tsv")
     if ado is None:
         raise SystemExit("No Azure DevOps CSV found. Pass --ado PATH.")
-    if github is None:
-        raise SystemExit("No GitHub TSV found. Pass --github PATH.")
     if not ado.exists():
         raise SystemExit(f"Azure DevOps file not found: {ado}")
-    if not github.exists():
-        raise SystemExit(f"GitHub file not found: {github}")
+    if args.github is not None:
+        github = args.github
+        if not github.exists():
+            raise SystemExit(f"GitHub file not found: {github}")
+    else:
+        github = discover_github_export(cwd)
+        if github is None:
+            raise SystemExit("No GitHub TSV found. Pass --github PATH.")
     return ado, github
 
 
@@ -133,9 +143,9 @@ def default_output(fmt: str) -> Path:
     return Path("output") / f"project-status{suffix}"
 
 
-def render_report(report, fmt: str) -> str:
+def render_report(report, fmt: str, briefing: str | None = None) -> str:
     if fmt == "html":
-        return render_html(report, datetime.now(timezone.utc))
+        return render_html(report, datetime.now(timezone.utc), briefing)
     if fmt == "markdown":
         return render_markdown(report)
     if fmt == "json":
@@ -150,13 +160,17 @@ def main(argv: list[str] | None = None) -> int:
     aliases_path = resolve_aliases(args, cwd)
     aliases = load_aliases(aliases_path)
     goal_order = load_goal_order(resolve_goal_order(args, cwd))
+    ado_goals = parse_ado_csv(ado_path)
     report = merge_project(
-        parse_ado_csv(ado_path),
+        ado_goals,
         parse_github_tsv(github_path),
         aliases,
         goal_order,
     )
-    body = render_report(report, args.format)
+    briefing = ""
+    if args.format == "html" and not args.no_summary:
+        briefing = generate_briefing(report)
+    body = render_report(report, args.format, briefing)
 
     if args.stdout:
         sys.stdout.write(body)
@@ -164,12 +178,13 @@ def main(argv: list[str] | None = None) -> int:
 
     output = args.output or default_output(args.format)
     if args.format == "html":
-        write_html(report, output)
+        write_html(report, output, briefing=briefing)
     else:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(body, encoding="utf-8")
 
     print(f"Wrote {output}", file=sys.stderr)
+    print(f"GitHub {github_path.name}", file=sys.stderr)
     if aliases_path is not None:
         print(f"Aliases {aliases_path}", file=sys.stderr)
         leftover = unused_alias_files(aliases_path, cwd)

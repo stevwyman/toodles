@@ -149,6 +149,7 @@ def parse_github_tsv(path: Path) -> dict[str, Node]:
                 github_status=status or ("Closed" if closed else ""),
                 github_number=issue_number(url),
                 closed_at=closed,
+                created_at=(row.get("Created") or "").strip(),
                 updated_at=(row.get("Updated") or "").strip(),
                 parent_url=parent,
                 noise=noise,

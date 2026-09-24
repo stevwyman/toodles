@@ -90,6 +90,7 @@ class Node:
     github_number: str = ""
     github_links: list[tuple[str, str]] = field(default_factory=list)
     closed_at: str = ""
+    created_at: str = ""
     updated_at: str = ""
     parent_url: str = ""
     matched: bool = False

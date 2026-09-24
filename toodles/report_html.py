@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from html import escape
 from pathlib import Path
 
+from toodles.history import DayActivity, daily_activity, working_window_start
 from toodles.merge import ProjectReport
 from toodles.models import Node, Progress
 
@@ -262,8 +263,229 @@ def _summary_card(
     )
 
 
-def render_html(report: ProjectReport, generated_at: datetime | None = None) -> str:
+def _briefing_body_html(text: str) -> str:
+    blocks: list[str] = []
+    items: list[str] = []
+
+    def flush_list() -> None:
+        if not items:
+            return
+        blocks.append("<ul>" + "".join(f"<li>{escape(item)}</li>" for item in items) + "</ul>")
+        items.clear()
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith(("- ", "* ", "• ")):
+            items.append(line[2:].strip())
+            continue
+        flush_list()
+        if line:
+            blocks.append(f"<p>{escape(line)}</p>")
+    flush_list()
+    return "".join(blocks)
+
+
+def _nice_ticks(peak: int) -> list[int]:
+    if peak <= 8:
+        return list(range(peak + 1))
+    for step in (2, 5, 10, 20, 25, 50, 100, 200, 250, 500):
+        if peak / step <= 6:
+            ticks = list(range(0, peak, step))
+            if ticks[-1] != peak:
+                ticks.append(peak)
+            return ticks
+    return [0, peak]
+
+
+def _chart_plot():
+    width, height, left, right, top, bottom = 640, 220, 42, 12, 16, 36
+    return width, height, left, right, top, bottom, width - left - right, height - top - bottom
+
+
+def _recent_band(series: list[DayActivity], left: float, plot_w: float, top: float, plot_h: float, recent_start: date) -> str:
+    if not series:
+        return ""
+    group_w = plot_w / len(series)
+    recent_index = next((index for index, day in enumerate(series) if day.day >= recent_start), len(series))
+    recent_x = left + recent_index * group_w
+    recent_w = left + plot_w - recent_x
+    return (
+        f'<rect class="recent-band" x="{recent_x:.1f}" y="{top}" '
+        f'width="{max(recent_w, 0):.1f}" height="{plot_h}" />'
+    )
+
+
+def _grid_and_labels(series: list[DayActivity], peak: int, left: float, plot_w: float, top: float, plot_h: float, height: float) -> tuple[str, str]:
+    ticks: list[str] = []
+    right = left + plot_w
+    for step in _nice_ticks(peak):
+        y = top + plot_h - plot_h * step / peak
+        ticks.append(
+            f'<line x1="{left}" x2="{right}" y1="{y:.1f}" y2="{y:.1f}" />'
+            f'<text class="y" x="{left - 6}" y="{y + 3:.1f}" text-anchor="end">{step}</text>'
+        )
+    n = len(series)
+    group_w = plot_w / n
+    indexes = {0, n - 1}
+    if n <= 16:
+        indexes.update(index for index in range(n) if index % 2 == 0)
+    else:
+        indexes.update(index for index, day in enumerate(series) if day.day.day == 1)
+    labels: list[str] = []
+    seen_month: int | None = None
+    for index in sorted(indexes):
+        day = series[index].day
+        text = day.strftime("%d %b") if seen_month != day.month else day.strftime("%d")
+        seen_month = day.month
+        labels.append(
+            f'<text x="{left + (index + 0.5) * group_w:.1f}" y="{height - 8}" text-anchor="middle">'
+            f"{escape(text)}</text>"
+        )
+    return "".join(ticks), "".join(labels)
+
+
+def _axis_note(series: list[DayActivity]) -> str:
+    start = escape(series[0].day.strftime("%d %b %Y"))
+    end = escape(series[-1].day.strftime("%d %b %Y"))
+    return start if start == end else f"{start} – {end}"
+
+
+def _cumulative_chart_svg(series: list[DayActivity], recent_start: date) -> str:
+    width, height, left, right, top, bottom, plot_w, plot_h = _chart_plot()
+    opened = closed = 0
+    points: list[tuple[float, float, float, int, int]] = []
+    group_w = plot_w / len(series)
+    for index, day in enumerate(series):
+        opened += day.opened
+        closed += day.closed
+        x = left + (index + 0.5) * group_w
+        points.append((x, opened, closed, day.opened, day.closed))
+    peak = max(opened, closed, 1)
+    ticks, labels = _grid_and_labels(series, peak, left, plot_w, top, plot_h, height)
+    baseline = top + plot_h
+
+    def line(values: list[float]) -> str:
+        return " ".join(
+            f"{x:.1f},{top + plot_h - plot_h * value / peak:.1f}" for (x, *_rest), value in zip(points, values)
+        )
+
+    opened_vals = [item[1] for item in points]
+    closed_vals = [item[2] for item in points]
+    opened_pts = line(opened_vals)
+    closed_pts = line(closed_vals)
+    first_x, last_x = points[0][0], points[-1][0]
+    opened_fill = f"{first_x:.1f},{baseline:.1f} {opened_pts} {last_x:.1f},{baseline:.1f}"
+    closed_fill = f"{first_x:.1f},{baseline:.1f} {closed_pts} {last_x:.1f},{baseline:.1f}"
+    dots = []
+    for x, opened_n, closed_n, *_ in (points[0], points[-1]):
+        oy = top + plot_h - plot_h * opened_n / peak
+        cy = top + plot_h - plot_h * closed_n / peak
+        dots.append(f'<circle class="opened" cx="{x:.1f}" cy="{oy:.1f}" r="2.5" />')
+        dots.append(f'<circle class="closed" cx="{x:.1f}" cy="{cy:.1f}" r="2.5" />')
+    return (
+        '<figure class="activity-chart">'
+        "<figcaption>Cumulative opened vs closed"
+        f'<span class="chart-legend"><i class="opened"></i> Opened'
+        f'<i class="closed"></i> Closed'
+        f'<i class="recent"></i> Last 5 working days</span>'
+        f"<span class='chart-axis'>{_axis_note(series)}</span></figcaption>"
+        f'<svg viewBox="0 0 {width} {height}" role="img" '
+        'aria-label="Cumulative opened and closed tasks over the full project">'
+        f"{_recent_band(series, left, plot_w, top, plot_h, recent_start)}"
+        f'<g class="grid">{ticks}</g>'
+        f'<polygon class="opened-fill" points="{opened_fill}" />'
+        f'<polygon class="closed-fill" points="{closed_fill}" />'
+        f'<polyline class="opened-line" fill="none" points="{opened_pts}" />'
+        f'<polyline class="closed-line" fill="none" points="{closed_pts}" />'
+        f'<g class="dots">{"".join(dots)}</g>'
+        f'<g class="x-labels">{labels}</g>'
+        "</svg></figure>"
+    )
+
+
+def _open_chart_svg(series: list[DayActivity], recent_start: date) -> str:
+    width, height, left, right, top, bottom, plot_w, plot_h = _chart_plot()
+    group_w = plot_w / len(series)
+    open_n = 0
+    points: list[tuple[float, int, DayActivity]] = []
+    for index, day in enumerate(series):
+        open_n += day.delta
+        x = left + (index + 0.5) * group_w
+        points.append((x, open_n, day))
+    peak = max((value for _x, value, _day in points), default=0)
+    peak = max(peak, 1)
+    ticks, labels = _grid_and_labels(series, peak, left, plot_w, top, plot_h, height)
+    baseline = top + plot_h
+    line_pts = " ".join(
+        f"{x:.1f},{baseline - plot_h * value / peak:.1f}" for x, value, _day in points
+    )
+    first_x, last_x = points[0][0], points[-1][0]
+    fill_pts = f"{first_x:.1f},{baseline:.1f} {line_pts} {last_x:.1f},{baseline:.1f}"
+    dots: list[str] = []
+    for x, value, day in (points[0], points[-1]):
+        y = baseline - plot_h * value / peak
+        dots.append(
+            f'<circle class="open" cx="{x:.1f}" cy="{y:.1f}" r="2.5">'
+            f"<title>{escape(day.day.strftime('%d %b'))}: {value} open</title></circle>"
+        )
+    return (
+        '<figure class="activity-chart">'
+        "<figcaption>Open tickets"
+        f'<span class="chart-legend"><i class="opened"></i> Open (opened − closed)'
+        f'<i class="recent"></i> Last 5 working days</span>'
+        f"<span class='chart-axis'>{_axis_note(series)}</span></figcaption>"
+        f'<svg viewBox="0 0 {width} {height}" role="img" '
+        'aria-label="Open tickets each day over the full project">'
+        f"{_recent_band(series, left, plot_w, top, plot_h, recent_start)}"
+        f'<g class="grid">{ticks}</g>'
+        f'<polygon class="open-fill" points="{fill_pts}" />'
+        f'<polyline class="open-line" fill="none" points="{line_pts}" />'
+        f'<g class="dots">{"".join(dots)}</g>'
+        f'<g class="x-labels">{labels}</g>'
+        "</svg></figure>"
+    )
+
+
+def _activity_charts_html(series: list[DayActivity]) -> str:
+    if not series:
+        return ""
+    recent_start = working_window_start(series[-1].day, 5)
+    return (
+        '<div class="activity-charts">'
+        f"{_cumulative_chart_svg(series, recent_start)}{_open_chart_svg(series, recent_start)}"
+        "</div>"
+    )
+
+
+def _render_briefing(
+    text: str | None,
+    chart: str = "",
+) -> str:
+    if not (text or "").strip() and not chart:
+        return ""
+    body = _briefing_body_html(text or "") + chart
+    return (
+        '<details class="briefing">'
+        "<summary><div class='briefing-head'>"
+        "<div class='goal-heading'><span class='kind'>Briefing</span>"
+        "<h2>Status summary</h2></div>"
+        "</div></summary>"
+        f"<div class='briefing-body'>{body}</div>"
+        "</details>"
+    )
+
+
+def render_html(
+    report: ProjectReport,
+    generated_at: datetime | None = None,
+    briefing: str | None = None,
+    as_of: date | None = None,
+) -> str:
     generated_at = generated_at or datetime.now(timezone.utc)
+    as_of = as_of or date.today()
+    chart = ""
+    if (briefing or "").strip():
+        chart = _activity_charts_html(daily_activity(report.work_items(), as_of))
     overall = report.overall_progress()
     bugs = report.bug_progress()
     goal_cards = [
@@ -573,6 +795,62 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
     .gap ul {{ margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }}
     .gap li span {{ display: block; color: var(--pf-muted); font-size: 12px; }}
     .orphan-head {{ margin: 16px 12px 8px; font-size: 16px; font-weight: 500; }}
+    details.briefing {{
+      background: var(--pf-card);
+      border: 1px solid var(--pf-line);
+      border-radius: var(--pf-radius);
+      box-shadow: 0 1px 2px rgba(3,3,3,0.06);
+      margin: 0 0 16px;
+    }}
+    details.briefing > summary {{
+      display: flex; align-items: flex-start; padding: 12px 16px;
+    }}
+    details.briefing > summary .briefing-head {{ flex: 1; min-width: 0; }}
+    .briefing-head {{
+      display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+    }}
+    .briefing-body {{ padding: 0 16px 16px 40px; color: var(--pf-ink); }}
+    .briefing-body p {{ margin: 0 0 8px; }}
+    .briefing-body ul {{ margin: 0 0 12px; padding: 0 0 0 18px; display: grid; gap: 6px; }}
+    .activity-charts {{
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;
+    }}
+    @media (max-width: 960px) {{
+      .activity-charts {{ grid-template-columns: 1fr; }}
+    }}
+    .activity-chart {{
+      margin: 0; padding: 12px 12px 8px; background: #f8f9fa;
+      border: 1px solid var(--pf-line); border-radius: var(--pf-radius);
+      min-width: 0;
+    }}
+    .activity-chart figcaption {{
+      display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+      justify-content: space-between; margin: 0 0 8px; font-size: 13px; font-weight: 600;
+    }}
+    .activity-chart .chart-legend {{
+      display: inline-flex; gap: 12px; align-items: center; font-weight: 400;
+      color: var(--pf-muted); font-size: 12px;
+    }}
+    .activity-chart .chart-legend i {{
+      display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px;
+      vertical-align: -1px;
+    }}
+    .activity-chart .chart-legend i.opened {{ background: #06c; }}
+    .activity-chart .chart-legend i.closed {{ background: #3e8635; }}
+    .activity-chart .chart-legend i.recent {{ background: #f0ab00; opacity: 0.35; }}
+    .activity-chart .chart-axis {{ font-weight: 400; color: var(--pf-muted); font-size: 12px; }}
+    .activity-chart svg {{ width: 100%; height: auto; display: block; }}
+    .activity-chart .recent-band {{ fill: #f0ab00; opacity: 0.12; }}
+    .activity-chart .grid line {{ stroke: var(--pf-line); stroke-width: 1; }}
+    .activity-chart .grid text, .activity-chart .x-labels text {{
+      fill: var(--pf-muted); font-size: 10px; font-family: inherit;
+    }}
+    .activity-chart rect.opened, .activity-chart circle.opened, .activity-chart circle.open {{ fill: #06c; }}
+    .activity-chart rect.closed, .activity-chart circle.closed {{ fill: #3e8635; }}
+    .activity-chart polyline.opened-line, .activity-chart polyline.open-line {{ stroke: #06c; stroke-width: 2; }}
+    .activity-chart polyline.closed-line {{ stroke: #3e8635; stroke-width: 2; }}
+    .activity-chart polygon.opened-fill, .activity-chart polygon.open-fill {{ fill: #06c; opacity: 0.12; }}
+    .activity-chart polygon.closed-fill {{ fill: #3e8635; opacity: 0.12; }}
     .hidden {{ display: none !important; }}
     @media print {{
       .masthead {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
@@ -595,6 +873,7 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
         Goals follow the manual order in goal-order.json.
         Generated {escape(generated_at.strftime("%d %b %Y, %H:%M UTC"))}.
         {report.matched_epics} epics matched across both systems.</p>
+      {_render_briefing(briefing, chart)}
       <div class="toolbar">
         <input id="search" type="search" placeholder="Filter by goal, epic or task title">
         <select id="goal">
@@ -737,9 +1016,14 @@ def render_html(report: ProjectReport, generated_at: datetime | None = None) -> 
 """
 
 
-def write_html(report: ProjectReport, path: Path, generated_at: datetime | None = None) -> None:
+def write_html(
+    report: ProjectReport,
+    path: Path,
+    generated_at: datetime | None = None,
+    briefing: str | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_html(report, generated_at), encoding="utf-8")
+    path.write_text(render_html(report, generated_at, briefing), encoding="utf-8")
 
 
 def report_to_dict(report: ProjectReport) -> dict:

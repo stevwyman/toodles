@@ -23,14 +23,17 @@ input/
 python3 -m toodles
 ```
 
-If you omit `--ado` / `--github`, the newest `*.csv` and `*.tsv` in `input/` (or the current directory) are used. Alias files (`aliases.json`, `aliases-multi.json`, or another `*alias*.json`) and `input/goal-order.json` are picked up automatically when present. If several alias files exist, `aliases.json` wins; pass `--aliases PATH` to choose another.
+If you omit `--ado` / `--github`, the newest `*.csv` in `input/` (or the current directory) is used, and the GitHub TSV is the **latest** `*.tsv` after sorting by file date, then by the trailing `(n)` in the filename (`(9)` before `(10)`). Only that current TSV is processed. Alias files (`aliases.json`, `aliases-multi.json`, or another `*alias*.json`) and `input/goal-order.json` are picked up automatically when present. If several alias files exist, `aliases.json` wins; pass `--aliases PATH` to choose another.
 
 ```bash
 python3 -m toodles --format markdown -o output/status.md
 python3 -m toodles --format text --stdout
 python3 -m toodles --format json -o output/status.json
 python3 -m toodles --open
+python3 -m toodles --no-summary
 ```
+
+A folded **Status summary** at the top of the HTML report is computed from each task's `Created` and `Closed` timestamps (last 5 working days and last 15 working days), with two charts for the full project: cumulative opened vs closed, and open tickets each day (running opened minus closed). Use `--no-summary` to skip it.
 
 ## How matching works
 
@@ -76,7 +79,7 @@ GitHub TSV: `Type`, `Title`, `URL`, `Status`, `Parent issue`, `Closed`, `Updated
 ## Tests
 
 ```bash
-PYTHONPATH=. python3 -m unittest tests.test_merge -v
+PYTHONPATH=. python3 -m unittest tests.test_merge tests.test_cli tests.test_briefing tests.test_history -v
 ```
 
 Tests use anonymized fixtures in `tests/fixtures/`.
