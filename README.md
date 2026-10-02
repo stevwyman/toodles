@@ -9,7 +9,7 @@ Epics are the join key. The tool matches them by title across both systems, then
 
 ## Input files
 
-Put local exports in `input/` (this folder is gitignored):
+Put local exports in `input/`. TSV snapshots stay gitignored; the Azure DevOps CSV, aliases, and goal-order files can be committed so CI can build the report.
 
 ```
 input/
@@ -20,17 +20,28 @@ input/
 ```
 
 ```bash
-python3 -m toodles
+python3 -m toodles --import
 ```
+
+That fetches the GitHub project through the API, writes `input/my-projects.tsv`, then builds the report. The token is read from the environment (`GITHUB_TOKEN`, or `TOODLES_GITHUB_TOKEN`). Org and project come from `--github-org` / `--github-project` / `--github-project-number`, or from `GITHUB_ORG`, `GITHUB_PROJECT`, and `GITHUB_PROJECT_NUMBER`. A local `.env` file is loaded if present (see `.env.example`) and never overrides variables already set.
+
+If you omit `--import` but those environment values are already set, the same fetch-then-build path runs. Use `--no-import` to keep an existing TSV. Use `--github PATH` to point at a hand-exported file.
 
 If you omit `--ado` / `--github`, the newest `*.csv` in `input/` (or the current directory) is used, and the GitHub TSV is the **latest** `*.tsv` after sorting by file date, then by the trailing `(n)` in the filename (`(9)` before `(10)`). Only that current TSV is processed. Alias files (`aliases.json`, `aliases-multi.json`, or another `*alias*.json`) and `input/goal-order.json` are picked up automatically when present. If several alias files exist, `aliases.json` wins; pass `--aliases PATH` to choose another.
 
 ```bash
+python3 -m toodles --import --open
+python3 -m toodles --no-import
 python3 -m toodles --format markdown -o output/status.md
 python3 -m toodles --format text --stdout
 python3 -m toodles --format json -o output/status.json
-python3 -m toodles --open
 python3 -m toodles --no-summary
+```
+
+Import alone:
+
+```bash
+python3 -m toodles.github_import --org my-org --project "My board" --output input/my-projects.tsv
 ```
 
 A folded **Status summary** at the top of the HTML report is computed from each task's `Created` and `Closed` timestamps (last 5 working days and last 15 working days), with two charts for the full project: cumulative opened vs closed, and open tickets each day (running opened minus closed). Use `--no-summary` to skip it.
@@ -76,10 +87,32 @@ Azure DevOps CSV: `ID`, `Work Item Type`, `Title`, `Assigned To`, `State`, `Tags
 
 GitHub TSV: `Type`, `Title`, `URL`, `Status`, `Parent issue`, `Closed`, `Updated`
 
+## GitHub Actions and Pages
+
+`.github/workflows/publish-status.yml` imports the project every six hours (and on push to `main`), writes `output/index.html`, and publishes it to GitHub Pages.
+
+1. Create a fine-grained or classic PAT that can read the org project (`read:project` and `read:org`).
+2. Add a repository secret named `TOODLES_GITHUB_TOKEN`.
+3. Add repository variables `TOODLES_GITHUB_ORG`, `TOODLES_GITHUB_PROJECT`, and optionally `TOODLES_GITHUB_PROJECT_NUMBER`.
+4. Commit the Azure DevOps CSV plus `input/aliases*.json` and `input/goal-order.json` (those config files are no longer gitignored).
+5. In the repo: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+
+The workflow passes the secret into the process environment as `GITHUB_TOKEN`:
+
+```yaml
+env:
+  GITHUB_TOKEN: ${{ secrets.TOODLES_GITHUB_TOKEN }}
+  GITHUB_ORG: ${{ vars.TOODLES_GITHUB_ORG }}
+  GITHUB_PROJECT: ${{ vars.TOODLES_GITHUB_PROJECT }}
+  GITHUB_PROJECT_NUMBER: ${{ vars.TOODLES_GITHUB_PROJECT_NUMBER }}
+```
+
+The published site is `https://<owner>.github.io/<repo>/`.
+
 ## Tests
 
 ```bash
-PYTHONPATH=. python3 -m unittest tests.test_merge tests.test_cli tests.test_briefing tests.test_history -v
+PYTHONPATH=. python3 -m unittest discover -s tests -v
 ```
 
 Tests use anonymized fixtures in `tests/fixtures/`.

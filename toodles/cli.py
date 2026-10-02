@@ -7,6 +7,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from toodles.briefing import generate_briefing
+from toodles.github_import import (
+    DEFAULT_TSV,
+    env_org,
+    env_project,
+    env_project_number,
+    github_token,
+    import_project,
+    load_env_file,
+)
 from toodles.history import discover_github_export
 from toodles.merge import merge_project
 from toodles.parse import load_aliases, load_goal_order, parse_ado_csv, parse_github_tsv
@@ -98,7 +107,56 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the folded status summary and charts",
     )
+    parser.add_argument(
+        "--import",
+        dest="do_import",
+        action="store_true",
+        help="Fetch the GitHub project via the API, write input/my-projects.tsv, then build the report",
+    )
+    parser.add_argument(
+        "--no-import",
+        action="store_true",
+        help="Skip the GitHub API import and use an existing TSV",
+    )
+    parser.add_argument("--github-org", default="", help="GitHub organization login (or GITHUB_ORG)")
+    parser.add_argument("--github-project", default="", help="GitHub project title (or GITHUB_PROJECT)")
+    parser.add_argument(
+        "--github-project-number",
+        type=int,
+        default=None,
+        help="GitHub project number (or GITHUB_PROJECT_NUMBER)",
+    )
+    parser.add_argument(
+        "--import-output",
+        type=Path,
+        default=None,
+        help=f"Where to write the imported TSV (default: {DEFAULT_TSV})",
+    )
     return parser
+
+
+def resolve_import(args: argparse.Namespace, cwd: Path) -> Path | None:
+    """Import the GitHub project when asked, or when token + org + project are in the environment."""
+    if getattr(args, "no_import", False):
+        return None
+    token = github_token()
+    org = getattr(args, "github_org", "") or env_org()
+    project = getattr(args, "github_project", "") or env_project()
+    number = getattr(args, "github_project_number", None)
+    if number is None:
+        number = env_project_number()
+    output = getattr(args, "import_output", None) or (cwd / DEFAULT_TSV)
+    if not output.is_absolute():
+        output = cwd / output
+    should_import = getattr(args, "do_import", False) or (
+        token and org and (project or number is not None) and getattr(args, "github", None) is None
+    )
+    if not should_import:
+        return None
+    try:
+        return import_project(token=token, org=org, project=project, project_number=number, output=output)
+    except (RuntimeError, ValueError, OSError) as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def resolve_inputs(args: argparse.Namespace, cwd: Path) -> tuple[Path, Path]:
@@ -107,14 +165,19 @@ def resolve_inputs(args: argparse.Namespace, cwd: Path) -> tuple[Path, Path]:
         raise SystemExit("No Azure DevOps CSV found. Pass --ado PATH.")
     if not ado.exists():
         raise SystemExit(f"Azure DevOps file not found: {ado}")
-    if args.github is not None:
+    imported = resolve_import(args, cwd)
+    if imported is not None:
+        github = imported
+    elif args.github is not None:
         github = args.github
         if not github.exists():
             raise SystemExit(f"GitHub file not found: {github}")
     else:
         github = discover_github_export(cwd)
         if github is None:
-            raise SystemExit("No GitHub TSV found. Pass --github PATH.")
+            raise SystemExit(
+                "No GitHub TSV found. Pass --github PATH, or --import with GITHUB_TOKEN / GITHUB_ORG."
+            )
     return ado, github
 
 
@@ -155,7 +218,10 @@ def render_report(report, fmt: str, briefing: str | None = None) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.do_import and args.no_import:
+        raise SystemExit("Use either --import or --no-import, not both.")
     cwd = Path.cwd()
+    load_env_file(cwd / ".env")
     ado_path, github_path = resolve_inputs(args, cwd)
     aliases_path = resolve_aliases(args, cwd)
     aliases = load_aliases(aliases_path)

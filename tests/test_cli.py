@@ -72,7 +72,7 @@ class GithubDiscoveryTests(unittest.TestCase):
                 path = folder / name
                 path.write_text("x", encoding="utf-8")
                 os.utime(path, (same, same))
-            args = argparse.Namespace(ado=None, github=None)
+            args = argparse.Namespace(ado=None, github=None, no_import=True)
             _ado, github = resolve_inputs(args, cwd)
             self.assertEqual(github.name, "PM view (10).tsv")
 
@@ -91,7 +91,7 @@ class GithubDiscoveryTests(unittest.TestCase):
                 path = folder / name
                 path.write_text("x", encoding="utf-8")
                 os.utime(path, (same, same))
-            args = argparse.Namespace(ado=None, github=first)
+            args = argparse.Namespace(ado=None, github=first, no_import=True)
             _ado, github = resolve_inputs(args, cwd)
             self.assertEqual(github, first)
 

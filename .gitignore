@@ -1,6 +1,7 @@
 /input/*
 !/input/.gitkeep
 /output/
+.env
 /aliases.json
 /aliases*.json
 /goal-order.json
